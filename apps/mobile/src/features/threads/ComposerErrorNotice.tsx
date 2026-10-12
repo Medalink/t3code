@@ -11,6 +11,7 @@ export function ComposerErrorNotice(props: {
       <Notice
         message={props.message}
         icon="exclamationmark.circle"
+        iconTone="danger"
         floating
         onDismiss={props.onDismiss}
         dismissLabel="Dismiss error"

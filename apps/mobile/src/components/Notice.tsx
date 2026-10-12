@@ -11,6 +11,7 @@ export function Notice(props: {
   readonly message: string;
   readonly tone?: "default" | "danger";
   readonly icon?: AppSymbolName;
+  readonly iconTone?: "default" | "danger";
   readonly floating?: boolean;
   readonly onDismiss?: () => void;
   readonly dismissLabel?: string;
@@ -28,7 +29,11 @@ export function Notice(props: {
           <SymbolView
             name={props.icon}
             size={16}
-            tintColorClassName={danger ? "accent-danger-foreground" : "accent-icon-muted"}
+            tintColorClassName={
+              danger || props.iconTone === "danger"
+                ? "accent-danger-foreground"
+                : "accent-icon-muted"
+            }
           />
         </View>
       ) : null}
