@@ -265,9 +265,9 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
     const activityOf = (project: EnvironmentProject) =>
       lastActivity.get(`${project.environmentId}:${project.id}`) ?? "";
     const project = findPromptLinkProject(
-      [...flow.projectScopes.flatMap((scope) => scope.projects)].sort((left, right) =>
-        activityOf(right).localeCompare(activityOf(left)),
-      ),
+      flow.projectScopes
+        .flatMap((scope) => scope.projects)
+        .sort((left, right) => activityOf(right).localeCompare(activityOf(left))),
       repository,
     );
     if (project) {
