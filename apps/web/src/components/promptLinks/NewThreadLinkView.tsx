@@ -46,7 +46,7 @@ import { placeLinkedPrompt, warnAboutHiddenCharacters } from "./linkedPrompt";
 type LinkState =
   | { readonly status: "opening" }
   | { readonly status: "opened" }
-  | { readonly status: "failed"; readonly message: string }
+  | { readonly status: "failed"; readonly message: string; readonly title?: string }
   | { readonly status: "missing-repository"; readonly repository: PromptLinkRepository }
   | {
       readonly status: "pull-request-checkout";
@@ -65,12 +65,12 @@ const openedLinkKeys = new Set<string>();
 export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
   const locationKey = useLocation({ select: (location) => location.state.__TSR_key ?? "" });
   const navigate = useNavigate();
-  // Projects arrive after the shells say they are bootstrapped, and the link needs them to
-  // find its repository, so it waits for both.
+  // The link needs projects to find its repository. Every machine's live projects are best;
+  // with one offline, the projects already in from the others are enough.
   const shellsReady = useAllEnvironmentShellsBootstrapped();
   const projectsReady = useAllEnvironmentProjectSnapshotsReady();
-  const ready = shellsReady && projectsReady;
   const projects = useProjects();
+  const ready = projectsReady || (shellsReady && projects.length > 0);
   const threads = useThreadShells();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -90,6 +90,15 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
       threads,
       "updated_at",
     );
+
+  /** The machine the user worked on last, scratch threads included. */
+  const lastActiveEnvironmentId = () => {
+    let latest: (typeof threads)[number] | undefined;
+    for (const thread of threads) {
+      if (latest === undefined || thread.updatedAt > latest.updatedAt) latest = thread;
+    }
+    return latest?.environmentId ?? primaryEnvironmentId;
+  };
 
   /** Opens a draft in the project with the link's prompt and, when it is available, model. */
   const openDraft = async (project: EnvironmentProject, extraPrompt?: string) => {
@@ -133,15 +142,17 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
     );
   };
 
-  /** "No project" on the machine the user last worked on, or that project when it has none. */
+  /** "No project" on the machine the user last worked on. */
   const openWithoutProject = async () => {
     setState({ status: "opening" });
-    const recent = recentProjects()[0] ?? null;
-    const environmentId = scratchEnvironmentId(recent?.environmentId ?? primaryEnvironmentId);
-    const project =
-      environmentId === null ? recent : ((await openScratchProject(environmentId)) ?? recent);
+    const environmentId = scratchEnvironmentId(lastActiveEnvironmentId());
+    // Reports its own failure.
+    const project = environmentId === null ? null : await openScratchProject(environmentId);
     if (project === null) {
-      setState({ status: "failed", message: "Connect to a machine running T3 Code first." });
+      setState({
+        status: "failed",
+        message: "None of your machines can start a thread without a project right now.",
+      });
       return;
     }
     // Without its repository, a pull request link still says which one it meant.
@@ -152,7 +163,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
   };
 
   const cloneRepository = async (repository: PromptLinkRepository) => {
-    const environmentId = recentProjects()[0]?.environmentId ?? primaryEnvironmentId;
+    const environmentId = lastActiveEnvironmentId();
     const environment = environments.find((entry) => entry.environmentId === environmentId);
     const newProjectsRoot = environment?.serverConfig?.newProjectsRoot ?? null;
     if (
@@ -202,8 +213,13 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
       setState({ status: "failed", message: "The clone started, but its project did not appear." });
       return;
     }
+    // A pull request checks out from the cloned repository, which is not there yet.
     if (link.kind === "pull-request") {
-      setState({ status: "pull-request-checkout", project });
+      setState({
+        status: "failed",
+        title: `Cloning ${repository.owner}/${repository.name}`,
+        message: "Open this link again when the clone finishes.",
+      });
       return;
     }
     await openDraft(project);
@@ -269,7 +285,9 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
         </LinkPage>
       );
     case "failed":
-      return <LinkPage title="Could not open the link" description={state.message} />;
+      return (
+        <LinkPage title={state.title ?? "Could not open the link"} description={state.message} />
+      );
     case "missing-repository": {
       const name = `${state.repository.owner}/${state.repository.name}`;
       return (

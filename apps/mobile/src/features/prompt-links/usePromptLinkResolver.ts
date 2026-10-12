@@ -74,6 +74,7 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
   // clone a repository the user already has.
   const waitingForShells =
     catalogState.isLoadingConnections ||
+    catalogState.hasPendingShellSnapshot ||
     (!catalogState.hasLoadedShellSnapshot &&
       catalogState.hasConnectingEnvironment &&
       catalogState.connectionError === null);
@@ -191,8 +192,11 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
     }
     await waitForComposerDraftsLoaded();
     const draftKey = flow.draftKey;
+    // A pull request's prompt belongs on its branch, which the picker's draft cannot carry.
     const carried =
-      draftKey !== null && getComposerDraftSnapshot(draftKey).text.trim().length === 0;
+      request.pullRequest === null &&
+      draftKey !== null &&
+      getComposerDraftSnapshot(draftKey).text.trim().length === 0;
     const modelUnavailable = carried ? writeDraft(draftKey, environmentId, request) : false;
     const name = promptLinkRepositoryName(repository);
     navigation.dispatch(
@@ -251,9 +255,19 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
       void openScratchDraft(request);
       return;
     }
-    // Scopes are ordered most recently active first, so the user lands where they last worked.
+    // Most recently active first, so the user lands where they last worked. Scopes are ordered
+    // that way, but the checkouts inside one are not.
+    const lastActivity = new Map<string, string>();
+    for (const thread of threads) {
+      const key = `${thread.environmentId}:${thread.projectId}`;
+      if (thread.updatedAt > (lastActivity.get(key) ?? "")) lastActivity.set(key, thread.updatedAt);
+    }
+    const activityOf = (project: EnvironmentProject) =>
+      lastActivity.get(`${project.environmentId}:${project.id}`) ?? "";
     const project = findPromptLinkProject(
-      flow.projectScopes.flatMap((scope) => scope.projects),
+      [...flow.projectScopes.flatMap((scope) => scope.projects)].sort((left, right) =>
+        activityOf(right).localeCompare(activityOf(left)),
+      ),
       repository,
     );
     if (project) {

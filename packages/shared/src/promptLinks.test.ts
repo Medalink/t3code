@@ -68,6 +68,7 @@ describe("parseNewThreadLink", () => {
   it("refuses links it cannot open safely", () => {
     expect(parseNewThreadLink("?repo=a/b").ok).toBe(false);
     expect(parseNewThreadLink("?prompt=%E2%80%8B").ok).toBe(false);
+    expect(parseThreadLinkPrompt("?prompt=%E2%80%8B").ok).toBe(false);
     expect(parseNewThreadLink("?prompt=x&repo=../etc").ok).toBe(false);
     expect(parseNewThreadLink(`?prompt=${"x".repeat(8_001)}`).ok).toBe(false);
   });

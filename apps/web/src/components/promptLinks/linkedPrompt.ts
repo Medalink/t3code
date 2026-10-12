@@ -16,32 +16,28 @@ export function warnAboutHiddenCharacters(prompt: LinkedPrompt): void {
 }
 
 /**
- * Says where a linked prompt came from: it was not written here, so it must be read before it
- * is sent. `notes` carry anything else the link asked for and did not get, such as a model.
- */
-function showLinkedPromptNotices(prompt: LinkedPrompt, notes: ReadonlyArray<string>): void {
-  warnAboutHiddenCharacters(prompt);
-  toastManager.add({
-    type: "info",
-    title: "Prompt added from a link",
-    description: ["Read it before you send.", ...notes].join(" "),
-  });
-}
-
-/**
  * Puts a linked prompt in a composer for the user to read and send. Text the user already typed
  * there is never replaced without asking: a toast offers to swap it for the linked prompt.
+ * `notes` carry anything the link asked for and did not get, such as a model.
  */
 export function placeLinkedPrompt(
   target: ComposerThreadTarget,
   prompt: LinkedPrompt,
   notes: ReadonlyArray<string> = [],
 ): void {
-  const store = useComposerDraftStore.getState();
-  const existing = store.getComposerDraft(target)?.prompt ?? "";
+  warnAboutHiddenCharacters(prompt);
+  const place = () => {
+    useComposerDraftStore.getState().setPrompt(target, prompt.text);
+    // It was not written here, so it must be read before it is sent.
+    toastManager.add({
+      type: "info",
+      title: "Prompt added from a link",
+      description: ["Read it before you send.", ...notes].join(" "),
+    });
+  };
+  const existing = useComposerDraftStore.getState().getComposerDraft(target)?.prompt ?? "";
   if (existing.trim().length === 0 || existing === prompt.text) {
-    store.setPrompt(target, prompt.text);
-    showLinkedPromptNotices(prompt, notes);
+    place();
     return;
   }
   const id = toastManager.add({
@@ -53,8 +49,7 @@ export function placeLinkedPrompt(
       children: "Replace draft",
       onClick: () => {
         toastManager.close(id);
-        useComposerDraftStore.getState().setPrompt(target, prompt.text);
-        showLinkedPromptNotices(prompt, notes);
+        place();
       },
     },
   });

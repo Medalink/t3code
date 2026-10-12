@@ -135,6 +135,13 @@ function readPrompt(params: URLSearchParams): PromptLinkResult<LinkedPrompt | nu
     };
   }
   const prompt = sanitizeLinkedPrompt(raw);
+  if (prompt.text.length === 0 && prompt.hiddenCharacters > 0) {
+    return {
+      ok: false,
+      error:
+        "This prompt had only hidden characters, so it may be malicious. T3 Code did not open it.",
+    };
+  }
   return { ok: true, value: prompt.text.length > 0 ? prompt : null };
 }
 
