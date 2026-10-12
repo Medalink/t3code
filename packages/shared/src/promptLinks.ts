@@ -56,10 +56,11 @@ export type PromptLinkResult<T> =
 // render as nothing. A model reads them; the person checking the draft cannot see them, which
 // makes them the usual way to hide instructions in a prompt. U+FE0E/U+FE0F stay: emoji use them.
 const HIDDEN_CHARACTERS =
+  // oxlint-disable-next-line no-control-regex, no-misleading-character-class -- these are the characters it removes.
   /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B\u200C\u200E\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0D\uFEFF\uFFA0\uFFF0-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0000}-\u{E0FFF}]/gu;
 // A zero-width joiner is visible work only inside an emoji sequence such as a family or a flag.
 const STRAY_ZERO_WIDTH_JOINER =
-  /(?<![\p{Extended_Pictographic}\uFE0F\u{1F3FB}-\u{1F3FF}])\u200D|\u200D(?!\p{Extended_Pictographic})/gu;
+  /(?<![\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F])\u200D|\u200D(?!\p{Extended_Pictographic})/gu;
 
 /** Removes characters a reader cannot see, and counts them. */
 export function sanitizeLinkedPrompt(raw: string): LinkedPrompt {

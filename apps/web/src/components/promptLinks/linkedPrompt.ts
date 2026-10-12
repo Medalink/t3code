@@ -1,0 +1,61 @@
+import type { LinkedPrompt } from "@t3tools/shared/promptLinks";
+
+import { type ComposerThreadTarget, useComposerDraftStore } from "~/composerDraftStore";
+
+import { toastManager } from "../ui/toast";
+
+/** A warning that stays until dismissed when the link's prompt hid characters from the reader. */
+export function warnAboutHiddenCharacters(prompt: LinkedPrompt): void {
+  if (prompt.hiddenCharacters === 0) return;
+  toastManager.add({
+    type: "warning",
+    title: "This prompt had hidden characters, it may be malicious",
+    description: `T3 Code removed ${prompt.hiddenCharacters} hidden character${prompt.hiddenCharacters === 1 ? "" : "s"}. Read the prompt before you send it.`,
+    timeout: 0,
+  });
+}
+
+/**
+ * Says where a linked prompt came from: it was not written here, so it must be read before it
+ * is sent. `notes` carry anything else the link asked for and did not get, such as a model.
+ */
+function showLinkedPromptNotices(prompt: LinkedPrompt, notes: ReadonlyArray<string>): void {
+  warnAboutHiddenCharacters(prompt);
+  toastManager.add({
+    type: "info",
+    title: "Prompt added from a link",
+    description: ["Read it before you send.", ...notes].join(" "),
+  });
+}
+
+/**
+ * Puts a linked prompt in a composer for the user to read and send. Text the user already typed
+ * there is never replaced without asking: a toast offers to swap it for the linked prompt.
+ */
+export function placeLinkedPrompt(
+  target: ComposerThreadTarget,
+  prompt: LinkedPrompt,
+  notes: ReadonlyArray<string> = [],
+): void {
+  const store = useComposerDraftStore.getState();
+  const existing = store.getComposerDraft(target)?.prompt ?? "";
+  if (existing.trim().length === 0 || existing === prompt.text) {
+    store.setPrompt(target, prompt.text);
+    showLinkedPromptNotices(prompt, notes);
+    return;
+  }
+  const id = toastManager.add({
+    type: "info",
+    title: "Linked prompt ready",
+    description: "This thread already has a draft. Replace it with the linked prompt?",
+    timeout: 0,
+    actionProps: {
+      children: "Replace draft",
+      onClick: () => {
+        toastManager.close(id);
+        useComposerDraftStore.getState().setPrompt(target, prompt.text);
+        showLinkedPromptNotices(prompt, notes);
+      },
+    },
+  });
+}

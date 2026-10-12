@@ -50,13 +50,15 @@ export function findPromptLinkPullRequestThread<
     repository: `${pullRequest.owner}/${pullRequest.name}`,
     number: pullRequest.number,
   });
-  return threads
-    .filter((thread) =>
-      visibleThreadPullRequests(threadPullRequestsOf(thread)).some(
-        (link) => threadPullRequestKeyOf(link) === key,
-      ),
-    )
-    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  let latest: T | undefined;
+  for (const thread of threads) {
+    if (latest !== undefined && thread.updatedAt <= latest.updatedAt) continue;
+    const linked = visibleThreadPullRequests(threadPullRequestsOf(thread)).some(
+      (link) => threadPullRequestKeyOf(link) === key,
+    );
+    if (linked) latest = thread;
+  }
+  return latest;
 }
 
 // People write the name they know. Driver kinds are what the server reports.
@@ -70,7 +72,9 @@ const PROVIDER_ALIASES: Record<string, string> = { claude: "claudeagent" };
 export function resolvePromptLinkModelSelection(
   providers: ReadonlyArray<
     Pick<ServerProvider, "instanceId" | "driver" | "enabled" | "availability" | "status"> & {
-      readonly models: ReadonlyArray<SelectableModelOption & { readonly isDefault?: boolean }>;
+      readonly models: ReadonlyArray<
+        SelectableModelOption & { readonly isDefault?: boolean | undefined }
+      >;
     }
   >,
   request: { readonly provider: string; readonly model: string | null },
