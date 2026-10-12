@@ -108,7 +108,7 @@ export function parsePromptLinkRepository(value: string): PromptLinkRepository |
 }
 
 /** `owner/name/123`, `owner/name#123`, or a GitHub pull request URL. */
-export function parsePromptLinkPullRequest(value: string): PromptLinkPullRequest | null {
+function parsePromptLinkPullRequest(value: string): PromptLinkPullRequest | null {
   const trimmed = value.trim();
   const match =
     /^https?:\/\/(?:www\.)?github\.com\/([^/?#]+)\/([^/?#]+)\/pull\/(\d+)(?:[/?#].*)?$/i.exec(
