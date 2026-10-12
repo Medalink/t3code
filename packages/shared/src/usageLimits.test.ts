@@ -11,7 +11,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   type LimitAccount,
-  fallbackAccountIdentity,
   foldLimitPeriods,
   indexLimitHistory,
   limitAccountStatus,
@@ -687,6 +686,31 @@ describe("pools", () => {
     expect(accounts[0]?.reportedBy).toEqual([
       { environmentId: "env-a", instanceId: null },
       { environmentId: "env-b", instanceId: null },
+    ]);
+  });
+
+  it("keeps an identity-less native instance per environment but one hub seat across them", () => {
+    const seat = { id: "seat.json", driver: claude, usageLimits: { checkedAt, windows: [window] } };
+    const presentation = (label: string) => ({
+      entry: { target: { label } },
+      serverConfig: {
+        providers: [provider({ usageLimits: { checkedAt, windows: [window] } })],
+        usageLimitSources: [{ ...source, accounts: [seat] }],
+      },
+    });
+    const accounts = collectLimitAccounts(
+      new Map([
+        [EnvironmentId.make("env-a"), presentation("Laptop")],
+        [EnvironmentId.make("env-b"), presentation("Desktop")],
+      ]),
+    );
+    expect(accounts.map((account) => account.reportedBy)).toEqual([
+      [{ environmentId: "env-a", instanceId: "codex" }],
+      [{ environmentId: "env-b", instanceId: "codex" }],
+      [
+        { environmentId: "env-a", instanceId: null },
+        { environmentId: "env-b", instanceId: null },
+      ],
     ]);
   });
 
@@ -1492,32 +1516,6 @@ describe("Antigravity limit presentation", () => {
   });
 });
 
-describe("fallbackAccountIdentity", () => {
-  const environmentId = EnvironmentId.make("env-a");
-  it.each([
-    [
-      "scopes a native instance to its environment",
-      { _tag: "instance", instanceId: ProviderInstanceId.make("claude") } as const,
-      undefined,
-      "env-a:claude",
-    ],
-    [
-      "keys a hub account by hub only, not by environment",
-      { _tag: "source", sourceId: UsageLimitSourceId.make("hub"), accountId: "a.json" } as const,
-      undefined,
-      "hub:a.json",
-    ],
-    [
-      "keeps a hub account workspace in its key",
-      { _tag: "source", sourceId: UsageLimitSourceId.make("hub"), accountId: "a.json" } as const,
-      "ws-1",
-      "hub:a.json:ws-1",
-    ],
-  ])("%s", (_name, subject, workspaceId, expected) => {
-    expect(fallbackAccountIdentity(environmentId, subject, workspaceId)).toBe(expected);
-  });
-});
-
 describe("samePeriod", () => {
   const reset = Date.parse("2026-09-03T14:00:00.000Z");
   it.each([
@@ -1637,6 +1635,7 @@ describe("indexLimitHistory", () => {
     ]);
     const index = indexLimitHistory(
       presentations,
+      collectLimitAccounts(presentations),
       new Map([
         [
           envA,
@@ -1689,6 +1688,7 @@ describe("indexLimitHistory", () => {
     ]);
     const index = indexLimitHistory(
       presentations,
+      collectLimitAccounts(presentations),
       new Map([[envA, history(series({ email: "old@example.com" }))]]),
     );
     expect(index.size).toBe(0);
@@ -1704,11 +1704,14 @@ describe("indexLimitHistory", () => {
       subject: { _tag: "source", sourceId: hubId, accountId: "claude.json" },
       email: "same@example.com",
     });
-    const withLogins = (...logins: ServerProvider[]) =>
-      indexLimitHistory(
-        new Map([[envA, { ...laptop, serverConfig: { providers: logins } }]]),
+    const withLogins = (...logins: ServerProvider[]) => {
+      const presentations = new Map([[envA, { ...laptop, serverConfig: { providers: logins } }]]);
+      return indexLimitHistory(
+        presentations,
+        collectLimitAccounts(presentations),
         new Map([[envA, history(hubSeries)]]),
       );
+    };
     expect([...withLogins(login("claude", "org-a")).keys()]).toEqual([
       "claudeAgent:same@example.com:org-a",
     ]);
@@ -1719,7 +1722,11 @@ describe("indexLimitHistory", () => {
     const presentations = new Map([
       [envA, { ...laptop, serverConfig: { providers: [native({})] } }],
     ]);
-    const index = indexLimitHistory(presentations, new Map([[envA, history(series({}))]]));
+    const index = indexLimitHistory(
+      presentations,
+      collectLimitAccounts(presentations),
+      new Map([[envA, history(series({}))]]),
+    );
     expect([...index.keys()]).toEqual(["env-a:claude"]);
   });
 
@@ -1753,6 +1760,7 @@ describe("indexLimitHistory", () => {
       });
     const index = indexLimitHistory(
       presentations,
+      collectLimitAccounts(presentations),
       new Map([[envA, history(weekly("primary", t(-120), 20), weekly("secondary", t(-30), 40))]]),
     );
     expect([...(index.get("env-a:codex")?.keys() ?? [])]).toEqual(["weekly"]);
@@ -1799,7 +1807,6 @@ describe("limitAccountStatus", () => {
     ).toEqual({
       exhausted: true,
       backAt: Date.parse("2026-09-06T12:00:00.000Z"),
-      lastSeenAt: Date.parse(checkedAt),
     });
   });
 
@@ -1809,7 +1816,7 @@ describe("limitAccountStatus", () => {
         account([{ ...window, usedPercent: 100, resetsAt: "2026-09-03T11:59:00.000Z" }]),
         now,
       ),
-    ).toEqual({ exhausted: false, lastSeenAt: Date.parse(checkedAt) });
+    ).toEqual({ exhausted: false });
   });
 
   it("cannot say when quota is back while a spent window has no clock", () => {
@@ -1825,9 +1832,6 @@ describe("limitAccountStatus", () => {
   });
 
   it("is not exhausted while every window has quota left", () => {
-    expect(limitAccountStatus(account([window]), now)).toEqual({
-      exhausted: false,
-      lastSeenAt: Date.parse(checkedAt),
-    });
+    expect(limitAccountStatus(account([window]), now)).toEqual({ exhausted: false });
   });
 });

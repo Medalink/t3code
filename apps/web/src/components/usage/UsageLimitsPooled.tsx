@@ -507,13 +507,11 @@ export function UsageLimitsPooled({
   readonly now: number;
   readonly cursorPrompt?: ReactNode;
 }) {
-  const pools = useMemo(
-    () => collectLimitPools(collectLimitAccounts(presentations), now),
-    [presentations, now],
-  );
+  const accounts = useMemo(() => collectLimitAccounts(presentations), [presentations]);
+  const pools = useMemo(() => collectLimitPools(accounts, now), [accounts, now]);
   const historyIndex = useMemo(
-    () => indexLimitHistory(presentations, history),
-    [presentations, history],
+    () => indexLimitHistory(presentations, accounts, history),
+    [presentations, accounts, history],
   );
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);

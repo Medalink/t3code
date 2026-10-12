@@ -19,12 +19,7 @@ import { AccountAvatar } from "./UsageLimitsAccount";
 
 function refreshTargets(account: LimitAccount) {
   const native = account.reportedBy.filter((reporter) => reporter.instanceId !== null);
-  const targets = native.length > 0 ? native : account.reportedBy;
-  return [
-    ...new Map(
-      targets.map((target) => [`${target.environmentId}\u0000${target.instanceId ?? ""}`, target]),
-    ).values(),
-  ];
+  return native.length > 0 ? native : account.reportedBy;
 }
 
 function LedgerRow({ account, now }: { readonly account: LimitAccount; readonly now: number }) {
@@ -76,7 +71,7 @@ function LedgerRow({ account, now }: { readonly account: LimitAccount; readonly 
             </span>
           ) : null}
         </span>
-        {Number.isFinite(status.lastSeenAt) ? (
+        {Number.isFinite(Date.parse(account.limits.checkedAt)) ? (
           <span className="text-muted-foreground tabular-nums">
             Last seen {formatDayAwareTimestamp(account.limits.checkedAt, timestampFormat, now)}
           </span>

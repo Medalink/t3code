@@ -152,7 +152,7 @@ const hubReport = (account: UsageLimitSourceAccount): AccountReport => ({
  * native instance is scoped to its environment; a hub account is not, so two
  * environments reading one hub name its accounts once.
  */
-export function fallbackAccountIdentity(
+function fallbackAccountIdentity(
   environmentId: EnvironmentId,
   subject: UsageLimitHistorySubject,
   workspaceId: string | undefined,
@@ -245,9 +245,10 @@ export interface LimitAccount {
  */
 export function collectLimitAccounts(presentations: LimitPresentations): readonly LimitAccount[] {
   const accounts = new Map<string, LimitAccount>();
-  const creditSources = new Map<string, LimitAccount>();
-  const hubRedeems = new Map<string, LimitAccount>();
-  const merge = (key: string, next: LimitAccount) => {
+  type Report = Omit<LimitAccount, "identity">;
+  const creditSources = new Map<string, Report>();
+  const hubRedeems = new Map<string, Report>();
+  const merge = (key: string, next: Report) => {
     // Redeeming through a hub also clears the routing cooldown that hub holds
     // for the account. Redeeming natively against the same subscription resets
     // it upstream but leaves the hub refusing to route to the account until
@@ -329,7 +330,6 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       );
       merge(resolveKey(nativeReport(provider)) ?? key, {
         key,
-        identity: key,
         reportedBy: [{ environmentId, instanceId: provider.instanceId }],
         driver: provider.driver,
         displayName: provider.displayName?.trim() || null,
@@ -361,7 +361,6 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         );
         merge(resolveKey(hubReport(account)) ?? key, {
           key,
-          identity: key,
           reportedBy: [{ environmentId, instanceId: null }],
           driver: account.driver,
           displayName: account.email ? null : account.id.replace(/\.json$/i, ""),
@@ -668,9 +667,10 @@ export function foldLimitPeriods(
 
 export function indexLimitHistory(
   presentations: LimitPresentations,
+  accounts: readonly LimitAccount[],
   histories: ReadonlyMap<EnvironmentId, UsageLimitHistory>,
 ): LimitHistoryIndex {
-  const live = new Set(collectLimitAccounts(presentations).map((account) => account.identity));
+  const live = new Set(accounts.map((account) => account.identity));
   const resolveKey = liveAccountKeyResolver(presentations);
   const readings = new Map<
     string,
@@ -710,21 +710,17 @@ export function indexLimitHistory(
 export function limitAccountStatus(
   account: LimitAccount,
   now: number,
-):
-  | { readonly exhausted: false; readonly lastSeenAt: number }
-  | { readonly exhausted: true; readonly backAt: number | null; readonly lastSeenAt: number } {
-  const lastSeenAt = Date.parse(account.limits.checkedAt);
+): { readonly exhausted: false } | { readonly exhausted: true; readonly backAt: number | null } {
   const resets = account.limits.windows.flatMap((window) => {
     const resetsAt = resetMillis(window);
     const spent = remainingPercent(window) <= 0 && (resetsAt === null || resetsAt > now);
     return spent ? [resetsAt] : [];
   });
-  if (resets.length === 0) return { exhausted: false, lastSeenAt };
+  if (resets.length === 0) return { exhausted: false };
   const clocks = resets.flatMap((at) => (at === null ? [] : [at]));
   return {
     exhausted: true,
     backAt: clocks.length === resets.length ? Math.max(...clocks) : null,
-    lastSeenAt,
   };
 }
 
