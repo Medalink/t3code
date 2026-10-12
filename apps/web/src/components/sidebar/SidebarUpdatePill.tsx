@@ -345,37 +345,31 @@ function SidebarUpdateControl() {
       .finally(() => setIsActionPending(false));
   }, [action, isInteractionDisabled, prefersReducedMotion, runsEverything, state]);
 
-  const runEverything = useCallback(
-    async (continueThreads: boolean | undefined) => {
-      const bridge = window.desktopBridge;
-      setIsConfirmingEverything(false);
-      setIsActionPending(true);
-      setIsUpdatingEverything(true);
-      try {
-        await everything.run({
-          ...(continueThreads === undefined ? {} : { continueThreads }),
-          ...(bridge && action === "download"
-            ? { downloadLocal: () => downloadLocalUpdate(bridge, { notifyDownloaded: false }) }
-            : {}),
-          ...(bridge && action !== "none"
-            ? { installLocal: () => installLocalUpdate(bridge) }
-            : {}),
-        });
-      } catch (error) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not update everything",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          }),
-        );
-      } finally {
-        setIsUpdatingEverything(false);
-        setIsActionPending(false);
-      }
-    },
-    [action, everything],
-  );
+  const runEverything = useCallback(async () => {
+    const bridge = window.desktopBridge;
+    setIsConfirmingEverything(false);
+    setIsActionPending(true);
+    setIsUpdatingEverything(true);
+    try {
+      await everything.run({
+        ...(bridge && action === "download"
+          ? { downloadLocal: () => downloadLocalUpdate(bridge, { notifyDownloaded: false }) }
+          : {}),
+        ...(bridge && action !== "none" ? { installLocal: () => installLocalUpdate(bridge) } : {}),
+      });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not update everything",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        }),
+      );
+    } finally {
+      setIsUpdatingEverything(false);
+      setIsActionPending(false);
+    }
+  }, [action, everything]);
 
   const handleCheckAnimationIteration = useCallback(() => {
     setIsCheckAnimationLatched(
@@ -512,7 +506,7 @@ function SidebarUpdateControl() {
         summary={everything.summary}
         lines={everything.lines}
         restarts={everything.restarts}
-        onConfirm={(continueThreads) => void runEverything(continueThreads)}
+        onConfirm={() => void runEverything()}
       />
     </SidebarMenuItem>
   );

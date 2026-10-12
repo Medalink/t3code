@@ -35,7 +35,6 @@ function machine(
     connected: true,
     hostedByThisApp: false,
     canMaintain: true,
-    canWriteSettings: true,
     updateState: { status: "idle" },
     ...overrides,
   };
@@ -88,24 +87,24 @@ describe("collectRestartingMachines", () => {
     };
     const machines = [
       withContinuation("this-app", { hostedByThisApp: true }, true),
-      withContinuation("alvin"),
-      withContinuation("read-only", { canWriteSettings: false }),
+      withContinuation("alvin", {}, true),
+      withContinuation("opted-out", {}, false),
       machine("old", "0.0.40", "boot-service"),
       withContinuation("providers-only"),
     ];
-    const servers = ["alvin", "read-only", "old"].map((id) => ({
+    const servers = ["alvin", "opted-out", "old"].map((id) => ({
       environmentId: EnvironmentId.make(id),
     }));
 
     expect(collectRestartingMachines(machines, servers, true)).toEqual([
-      { environmentId: "this-app", continueSupported: true, continueEnabled: true },
-      { environmentId: "alvin", continueSupported: true, continueEnabled: false },
-      { environmentId: "read-only", continueSupported: false, continueEnabled: false },
-      { environmentId: "old", continueSupported: false, continueEnabled: false },
+      { environmentId: "this-app", continuesThreads: true },
+      { environmentId: "alvin", continuesThreads: true },
+      { environmentId: "opted-out", continuesThreads: false },
+      { environmentId: "old", continuesThreads: false },
     ]);
     expect(
       collectRestartingMachines(machines, servers, false).map((entry) => entry.environmentId),
-    ).toEqual(["alvin", "read-only", "old"]);
+    ).toEqual(["alvin", "opted-out", "old"]);
   });
 });
 
@@ -114,9 +113,6 @@ describe("runUpdateEverything", () => {
     const calls: string[] = [];
     let finishProviders = () => {};
     const run = runUpdateEverything({
-      prepare: async () => {
-        calls.push("prepare");
-      },
       downloadLocal: async () => {
         calls.push("download");
         return true;
@@ -135,30 +131,10 @@ describe("runUpdateEverything", () => {
     });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls).toEqual(["prepare", "download", "providers"]);
+    expect(calls).toEqual(["download", "providers"]);
     finishProviders();
     await run;
-    expect(calls).toEqual(["prepare", "download", "providers", "servers", "install"]);
-  });
-
-  it("updates nothing when prepare fails", async () => {
-    const calls: string[] = [];
-    const step = (name: string) => async () => {
-      calls.push(name);
-      return true;
-    };
-    await expect(
-      runUpdateEverything({
-        prepare: async () => {
-          throw new Error("setting not saved");
-        },
-        downloadLocal: step("download"),
-        updateProviders: async () => void (await step("providers")()),
-        updateServers: async () => void (await step("servers")()),
-        installLocal: async () => void (await step("install")()),
-      }),
-    ).rejects.toThrow("setting not saved");
-    expect(calls).toEqual([]);
+    expect(calls).toEqual(["download", "providers", "servers", "install"]);
   });
 
   it("still updates remote machines when the local download fails", async () => {

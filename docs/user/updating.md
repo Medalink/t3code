@@ -20,9 +20,9 @@ desktop apps do not wait for npm. Servers that need
 a manual update are not included. Use the notice or **Settings → Connections**
 for those.
 
-The confirmation counts the running threads that the restarts will interrupt.
-Check **Continue threads after restarts** there to turn that setting on for
-the machines that restart.
+The confirmation counts the running threads that the restarts will interrupt,
+and how many will continue afterwards. See **Continue threads after restarts**
+below.
 
 ## Before you update
 

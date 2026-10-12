@@ -1,9 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  AuthSettingsWriteScope,
-  PROVIDER_DISPLAY_NAMES,
-  sessionGrantsScope,
-} from "@t3tools/contracts";
+import { PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
@@ -14,7 +10,6 @@ import { useEnvironments } from "~/state/environments";
 import { useNpmReleasePublished } from "~/state/npmRelease";
 import { serverEnvironment } from "~/state/server";
 import { environmentSession } from "~/state/session";
-import { useAtomCommand } from "~/state/use-atom-command";
 import { useProviderUpdates } from "../ProviderUpdatesAction";
 import { canUpdateServer, useServerUpdate } from "../ServerUpdateAction";
 import {
@@ -37,25 +32,20 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   const machinesAtom = useMemo(
     () =>
       Atom.make((get) =>
-        environments.map((environment) => {
-          const session = get(environmentSession.sessionStateAtom(environment.environmentId));
-          return {
-            environmentId: environment.environmentId,
-            label: environment.label,
-            serverConfig: environment.serverConfig,
-            connected: environment.connection.phase === "connected",
-            hostedByThisApp:
-              isElectron &&
-              (environment.entry.target._tag === "PrimaryConnectionTarget" ||
-                isDesktopLocalConnectionTarget(environment.entry.target)),
-            canMaintain: canUpdateServer(session),
-            canWriteSettings:
-              session._tag === "Success" &&
-              session.value.authenticated &&
-              sessionGrantsScope(session.value, AuthSettingsWriteScope),
-            updateState: get(serverEnvironment.updateStateAtom(environment.environmentId)),
-          };
-        }),
+        environments.map((environment) => ({
+          environmentId: environment.environmentId,
+          label: environment.label,
+          serverConfig: environment.serverConfig,
+          connected: environment.connection.phase === "connected",
+          hostedByThisApp:
+            isElectron &&
+            (environment.entry.target._tag === "PrimaryConnectionTarget" ||
+              isDesktopLocalConnectionTarget(environment.entry.target)),
+          canMaintain: canUpdateServer(
+            get(environmentSession.sessionStateAtom(environment.environmentId)),
+          ),
+          updateState: get(serverEnvironment.updateStateAtom(environment.environmentId)),
+        })),
       ),
     [environments],
   );
@@ -71,7 +61,6 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   const restarts = collectRestartingMachines(machines, servers, localUpdateVersion !== null);
   const providers = useProviderUpdates();
   const updateServer = useServerUpdate();
-  const updateSettings = useAtomCommand(serverEnvironment.updateSettings);
 
   const { summary, lines } = describeUpdateEverything({
     localVersion: localUpdateVersion,
@@ -93,42 +82,13 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
     lines,
     /** The servers this run restarts, which stops their running threads. */
     restarts,
-    /** `continueThreads` sets "Continue threads after restarts" on every
-        restarting server before anything restarts. */
-    run: (local: {
-      downloadLocal?: () => Promise<boolean>;
-      installLocal?: () => Promise<void>;
-      continueThreads?: boolean;
-    }) => {
-      const { continueThreads, ...localSteps } = local;
-      return runUpdateEverything({
-        ...localSteps,
-        prepare: async () => {
-          if (continueThreads === undefined) return;
-          const results = await Promise.all(
-            restarts
-              .filter(
-                (machine) =>
-                  machine.continueSupported && machine.continueEnabled !== continueThreads,
-              )
-              .map((machine) =>
-                updateSettings({
-                  environmentId: machine.environmentId,
-                  input: { patch: { continueThreadsAfterServerUpdate: continueThreads } },
-                }),
-              ),
-          );
-          // A server that missed the setting would restart against the
-          // user's choice, so nothing restarts. The failed write toasts itself.
-          if (results.some((result) => result._tag === "Failure")) {
-            throw new Error("Nothing was updated because a thread setting could not be saved.");
-          }
-        },
+    run: (local: { downloadLocal?: () => Promise<boolean>; installLocal?: () => Promise<void> }) =>
+      runUpdateEverything({
+        ...local,
         updateProviders: providers.updateAll,
         updateServers: async () => {
           await Promise.all(servers.map((server) => updateServer(server)));
         },
-      });
-    },
+      }),
   };
 }

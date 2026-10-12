@@ -23,17 +23,14 @@ export interface UpdateEverythingMachine {
   readonly hostedByThisApp: boolean;
   /** The session holds the scope a server update needs. */
   readonly canMaintain: boolean;
-  /** The session may change this server's settings. */
-  readonly canWriteSettings: boolean;
   readonly updateState: ServerUpdateState;
 }
 
-/** A server that restarts during a run, and its thread continuation setting. */
+/** A server that restarts during a run. */
 export interface RestartingMachine {
   readonly environmentId: EnvironmentId;
-  /** The server resumes threads after a restart, and this client may change that setting. */
-  readonly continueSupported: boolean;
-  readonly continueEnabled: boolean;
+  /** The server resumes interrupted threads after it restarts. */
+  readonly continuesThreads: boolean;
 }
 
 /**
@@ -58,10 +55,9 @@ export function collectRestartingMachines(
     return [
       {
         environmentId: machine.environmentId,
-        continueSupported:
-          machine.canWriteSettings &&
-          config.environment.capabilities.threadRestartContinuation === true,
-        continueEnabled: config.settings.continueThreadsAfterServerUpdate ?? false,
+        continuesThreads:
+          config.environment.capabilities.threadRestartContinuation === true &&
+          config.settings.continueThreadsAfterServerUpdate === true,
       },
     ];
   });
@@ -119,8 +115,6 @@ export function collectServerUpdateTargets(
 }
 
 export interface UpdateEverythingSteps {
-  /** Runs before any other step, such as saving settings the restarts read. */
-  readonly prepare?: () => Promise<void>;
   /** Downloads this app's update. Resolves true when it is ready to install. */
   readonly downloadLocal?: () => Promise<boolean>;
   readonly updateProviders: () => Promise<void>;
@@ -130,14 +124,12 @@ export interface UpdateEverythingSteps {
 }
 
 /**
- * Runs one "update everything" pass. `prepare` finishes first, and when it
- * throws nothing else runs. Providers
+ * Runs one "update everything" pass. Providers
  * finish before any server restarts, so no install is cut off. The local download runs alongside the
  * remote work. This app installs last because its relaunch ends the run; a
  * failed download skips only that install. Steps report their own results.
  */
 export async function runUpdateEverything(steps: UpdateEverythingSteps): Promise<void> {
-  await steps.prepare?.();
   const [localReady] = await Promise.all([
     steps.downloadLocal?.() ?? Promise.resolve(true),
     steps.updateProviders().then(steps.updateServers),

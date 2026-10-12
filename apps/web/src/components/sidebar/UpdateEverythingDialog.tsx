@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
-import { useState } from "react";
 
 import { environmentThreadShells } from "~/state/threads";
 import {
@@ -14,7 +13,6 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
-import { Checkbox } from "../ui/checkbox";
 import type { RestartingMachine } from "./updateEverything.logic";
 
 /** A thread an agent is working on now. A restart stops these; queued threads wait. */
@@ -44,15 +42,13 @@ interface UpdateEverythingDialogProps {
   readonly summary: string;
   readonly lines: ReadonlyArray<string>;
   readonly restarts: ReadonlyArray<RestartingMachine>;
-  /** Gets the "Continue threads after restarts" choice, or undefined when
-      the dialog did not offer it. */
-  readonly onConfirm: (continueThreads: boolean | undefined) => void;
+  readonly onConfirm: () => void;
 }
 
 /**
  * Confirms an "update everything" run. It counts the running threads that the
- * restarts stop, and offers "Continue threads after restarts" for the
- * restarting servers.
+ * restarts stop, and how many of them continue afterwards ("Continue threads
+ * after restarts" is on for their server).
  */
 export function UpdateEverythingDialog({
   open,
@@ -75,14 +71,24 @@ function UpdateEverythingDialogContent({
   restarts,
   onConfirm,
 }: Omit<UpdateEverythingDialogProps, "open" | "onOpenChange">) {
-  const runningThreads = useAtomValue(
-    runningThreadCountAtom(restarts.map((machine) => machine.environmentId).join("\n")),
+  const stopped = useAtomValue(
+    runningThreadCountAtom(
+      restarts
+        .filter((machine) => !machine.continuesThreads)
+        .map((machine) => machine.environmentId)
+        .join("\n"),
+    ),
   );
-  const [continueThreads, setContinueThreads] = useState(() =>
-    restarts.every((machine) => machine.continueEnabled),
+  const continuing = useAtomValue(
+    runningThreadCountAtom(
+      restarts
+        .filter((machine) => machine.continuesThreads)
+        .map((machine) => machine.environmentId)
+        .join("\n"),
+    ),
   );
-  const offersContinue =
-    runningThreads > 0 && restarts.every((machine) => machine.continueSupported);
+  const running = stopped + continuing;
+  const threads = `${running} running ${running === 1 ? "thread" : "threads"}`;
 
   return (
     <>
@@ -91,29 +97,19 @@ function UpdateEverythingDialogContent({
         <AlertDialogDescription className="whitespace-pre-line">
           {lines.join("\n")}
         </AlertDialogDescription>
-        {runningThreads > 0 ? (
-          <div className="flex flex-col gap-2 pt-2 text-sm">
-            <p>
-              {runningThreads} running {runningThreads === 1 ? "thread" : "threads"} will be
-              interrupted.
-            </p>
-            {offersContinue ? (
-              <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
-                <Checkbox
-                  checked={continueThreads}
-                  onCheckedChange={(checked) => setContinueThreads(checked === true)}
-                />
-                Continue threads after restarts
-              </label>
-            ) : null}
-          </div>
+        {running > 0 ? (
+          <p className="pt-2 text-sm">
+            {stopped === 0
+              ? `${threads} will continue after the restart.`
+              : continuing === 0
+                ? `${threads} will be interrupted.`
+                : `${threads} will be interrupted. ${continuing} will continue after the restart.`}
+          </p>
         ) : null}
       </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-        <Button onClick={() => onConfirm(offersContinue ? continueThreads : undefined)}>
-          Update
-        </Button>
+        <Button onClick={onConfirm}>Update</Button>
       </AlertDialogFooter>
     </>
   );
