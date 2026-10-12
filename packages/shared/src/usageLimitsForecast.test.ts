@@ -11,11 +11,9 @@ import {
 import {
   type ForecastOptions,
   type LimitForecast,
-  defaultForecastHorizonDays,
   forecastPoolWindow,
   formatDrainPerHour,
   limitHistoryRequest,
-  samePeriod,
 } from "./usageLimitsForecast.ts";
 
 const MINUTE = 60_000;
@@ -460,26 +458,11 @@ describe("forecastPoolWindow drain series", () => {
 });
 
 describe("helpers", () => {
-  it("re-exports samePeriod for the server recorder", () => {
-    expect(samePeriod({ resetsAt: null, usedPercent: 1 }, { resetsAt: null, usedPercent: 2 })).toBe(
-      true,
-    );
-  });
-
   it("floors the history request to the quarter hour so refreshes share a key", () => {
     const request = limitHistoryRequest(at("2026-09-03T12:07:33.000Z"));
     expect(request).toEqual({ sinceMs: now - 10 * DAY });
     expect(limitHistoryRequest(at("2026-09-03T12:14:59.999Z"))).toEqual(request);
     expect(limitHistoryRequest(at("2026-09-03T12:15:00.000Z"))).not.toEqual(request);
-  });
-
-  it.each([
-    ["session", 1],
-    ["weekly", 7],
-    ["monthly", 30],
-    ["other", 30],
-  ] as const)("defaults a %s window to %i days", (kind, days) => {
-    expect(defaultForecastHorizonDays(kind)).toBe(days);
   });
 
   it.each([

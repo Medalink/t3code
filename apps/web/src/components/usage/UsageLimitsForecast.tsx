@@ -7,7 +7,7 @@ import {
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import {
-  defaultForecastHorizonDays,
+  DEFAULT_FORECAST_HORIZON_DAYS,
   type ForecastDrain,
   type ForecastOptions,
   forecastPoolWindow,
@@ -108,7 +108,7 @@ export function PoolForecast({
   const forecasts = useMemo(
     () =>
       displayLimitWindows(pool).map((window): WindowForecast => {
-        const horizonDays = preferences.horizonDays ?? defaultForecastHorizonDays(window.kind);
+        const horizonDays = preferences.horizonDays ?? DEFAULT_FORECAST_HORIZON_DAYS[window.kind];
         const horizonMs = horizonDays * DAY;
         const options: ForecastOptions = {
           now,

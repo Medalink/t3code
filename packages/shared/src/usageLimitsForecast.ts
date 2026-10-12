@@ -16,17 +16,14 @@ import {
   foldLimitPeriods,
   limitPoolKey,
   resetMillis,
-  samePeriod,
 } from "./usageLimits.ts";
-
-export { samePeriod };
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 /** Readings further apart than this are not joined by a line. */
-export const GAP_MS = 4 * HOUR;
+const GAP_MS = 4 * HOUR;
 const HISTORY_REQUEST_DAYS = 10;
 const MIN_FIT_SPAN_MS = 10 * MINUTE;
 const PROJECTION_EVENT_CAP = 10_000;
@@ -89,16 +86,12 @@ export function limitHistoryRequest(now: number): UsageLimitHistoryInput {
   return { sinceMs: floor - HISTORY_REQUEST_DAYS * DAY };
 }
 
-const HORIZON_DAYS: Record<LimitPoolWindow["kind"], 1 | 7 | 30> = {
+export const DEFAULT_FORECAST_HORIZON_DAYS: Record<LimitPoolWindow["kind"], 1 | 7 | 30> = {
   session: 1,
   weekly: 7,
   monthly: 30,
   other: 30,
 };
-
-export function defaultForecastHorizonDays(kind: LimitPoolWindow["kind"]): 1 | 7 | 30 {
-  return HORIZON_DAYS[kind];
-}
 
 /** `3.3%`, `12%`, `0.4%`. */
 export function formatDrainPerHour(perHour: number): string {
@@ -130,15 +123,6 @@ function prepareMember(member: LimitPoolMember, history: LimitHistoryIndex, now:
       ? window.windowDurationMins * MINUTE
       : null;
   const reportedReset = resetMillis(window);
-  const rolled = reportedReset !== null && reportedReset <= now;
-  const resetAt =
-    reportedReset === null
-      ? null
-      : rolled
-        ? periodMs === null
-          ? null
-          : reportedReset + Math.ceil((now - reportedReset + 1) / periodMs) * periodMs
-        : reportedReset;
   const checked = Date.parse(account.limits.checkedAt);
   const live: Reading = {
     at: Number.isFinite(checked) ? Math.min(checked, now) : now,
@@ -157,7 +141,12 @@ function prepareMember(member: LimitPoolMember, history: LimitHistoryIndex, now:
     live,
   ]);
   const current = periods.at(-1)!;
-  const anchorReset = rolled ? current.resetsAt : resetAt;
+  const { resetAt, anchorReset, fitAt } = rolledWindow(
+    reportedReset,
+    periodMs,
+    now,
+    current.resetsAt,
+  );
   const anchor =
     anchorReset !== null && periodMs !== null
       ? { at: anchorReset - periodMs, usedPercent: 0 }
@@ -167,7 +156,26 @@ function prepareMember(member: LimitPoolMember, history: LimitHistoryIndex, now:
     resetAt,
     periodMs,
     periods,
-    fit: fitRate(anchor, current.samples, rolled ? (current.resetsAt ?? now) : now, periodMs),
+    fit: fitRate(anchor, current.samples, fitAt, periodMs),
+  };
+}
+
+function rolledWindow(
+  reportedReset: number | null,
+  periodMs: number | null,
+  now: number,
+  periodReset: number | null,
+): { resetAt: number | null; anchorReset: number | null; fitAt: number } {
+  if (reportedReset === null || reportedReset > now) {
+    return { resetAt: reportedReset, anchorReset: reportedReset, fitAt: now };
+  }
+  return {
+    resetAt:
+      periodMs === null
+        ? null
+        : reportedReset + Math.ceil((now - reportedReset + 1) / periodMs) * periodMs,
+    anchorReset: periodReset,
+    fitAt: periodReset ?? now,
   };
 }
 
