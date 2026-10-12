@@ -158,7 +158,9 @@ export function PoolForecast({
             <Select
               value={windowKey(window)}
               onValueChange={(value) => {
-                if (typeof value === "string") setPickedWindow(value);
+                if (typeof value !== "string") return;
+                setPickedWindow(value);
+                if (settingsFor !== null) setSettingsFor(value);
               }}
             >
               <SelectTrigger
