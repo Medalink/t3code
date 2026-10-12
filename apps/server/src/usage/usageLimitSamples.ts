@@ -33,6 +33,12 @@ export interface UsageLimitReading {
 
 export interface UsageLimitObservation extends UsageLimitSeriesIdentity, UsageLimitReading {}
 
+function subjectFields(subject: UsageLimitHistorySubject): readonly string[] {
+  return subject._tag === "instance"
+    ? [subject._tag, subject.instanceId]
+    : [subject._tag, subject.sourceId, subject.accountId];
+}
+
 export function encodeSubject(subject: UsageLimitHistorySubject): string {
   return subject._tag === "instance"
     ? JSON.stringify({ _tag: "instance", instanceId: subject.instanceId })
@@ -41,7 +47,7 @@ export function encodeSubject(subject: UsageLimitHistorySubject): string {
 
 export function seriesKey(identity: UsageLimitSeriesIdentity): string {
   return JSON.stringify([
-    encodeSubject(identity.subject),
+    ...subjectFields(identity.subject),
     identity.driver,
     identity.email,
     identity.workspaceId,

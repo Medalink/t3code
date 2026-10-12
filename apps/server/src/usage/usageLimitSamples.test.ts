@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  encodeSubject,
   KEEPALIVE_MS,
   observeProviders,
   observeSources,
@@ -92,6 +93,18 @@ describe("shouldRecord", () => {
     ["just under an hour flat", last, reading({ sampledAt: now + KEEPALIVE_MS - 1 }), false],
   ])("%s → %s", (_, previous, next, expected) => {
     expect(shouldRecord(previous, next)).toBe(expected);
+  });
+});
+
+describe("encodeSubject", () => {
+  it("stores one form per reporter whatever order its keys arrive in", () => {
+    const sourceId = UsageLimitSourceId.make("hub");
+    expect(encodeSubject({ accountId: "a.json", sourceId, _tag: "source" })).toBe(
+      '{"_tag":"source","sourceId":"hub","accountId":"a.json"}',
+    );
+    expect(encodeSubject({ instanceId: ProviderInstanceId.make("codex"), _tag: "instance" })).toBe(
+      '{"_tag":"instance","instanceId":"codex"}',
+    );
   });
 });
 
