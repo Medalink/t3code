@@ -291,6 +291,7 @@ export function PoolForecast({
       </div>
       {settingsOpen ? (
         <ForecastSettings
+          key={windowKey(window)}
           entry={selected}
           history={history}
           override={options.drainOverridePerHour}

@@ -162,8 +162,9 @@ it("stays on the window being tuned when a manual rate moves the binding window"
   expect(input.value).toBe("10");
 });
 
-it("keeps settings open for the newly picked window", async () => {
+it("keeps settings open for the newly picked window, with that window's rate", async () => {
   await click(settingsButton());
+  await type(drainInput()!, "10");
   await pickWindow("Weekly");
 
   expect(shownWindow()).toBe("Weekly");
