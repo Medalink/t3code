@@ -21,8 +21,8 @@ import {
 /**
  * The remote half of the sidebar update button: outdated providers on every
  * connected machine, and servers behind the version this client runs or is
- * about to install (`localUpdateVersion`). Server targets appear only once npm
- * confirms that version. `run` performs the whole pass, including this app's
+ * about to install (`localUpdateVersion`). Servers that install from npm appear
+ * only once npm confirms that version. `run` performs the whole pass, including this app's
  * own download and install when given.
  */
 export function useUpdateEverything(localUpdateVersion: string | null) {
@@ -50,9 +50,13 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   );
   const machines = useAtomValue(machinesAtom);
   const behindServers = collectServerUpdateTargets(machines, targetVersion);
-  // Ask npm only when a server would download the version.
-  const published = useNpmReleasePublished(behindServers.length > 0 ? targetVersion : null);
-  const servers = published ? behindServers : [];
+  // A desktop-managed server installs from its own app's update feed, so only
+  // servers that download t3 from npm wait for npm to publish the version.
+  const needsNpm = behindServers.some((server) => server.selfUpdate !== "desktop-managed");
+  const published = useNpmReleasePublished(needsNpm ? targetVersion : null);
+  const servers = published
+    ? behindServers
+    : behindServers.filter((server) => server.selfUpdate === "desktop-managed");
   const providers = useProviderUpdates();
   const updateServer = useServerUpdate();
 

@@ -15,7 +15,8 @@ background service stays on its current release channel. A remote desktop app
 installs the latest release from its own channel. Hover the button to see what
 it will update.
 
-Server updates appear only after that version is published. Servers that need
+Server updates appear only after that version is published to npm. Remote
+desktop apps do not wait for npm. Servers that need
 a manual update are not included. Use the notice or **Settings → Connections**
 for those.
 
