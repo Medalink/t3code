@@ -319,6 +319,9 @@ import {
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
 import {
+  UsageLimitHistory,
+  UsageLimitHistoryError,
+  UsageLimitHistoryInput,
   UsageLimitSourceError,
   ProviderConsumeResetCreditInput,
   ProviderConsumeResetCreditResult,
@@ -510,6 +513,7 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
+  serverGetUsageLimitHistory: "server.getUsageLimitHistory",
 
   // Scheduled tasks
   scheduledTasksList: "scheduledTasks.list",
@@ -903,6 +907,13 @@ const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
   payload: UsageSummaryInput,
   success: UsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
+});
+
+/** Recorded quota windows per account, for the Limits history chart and forecast. */
+const WsServerGetUsageLimitHistoryRpc = Rpc.make(WS_METHODS.serverGetUsageLimitHistory, {
+  payload: UsageLimitHistoryInput,
+  success: UsageLimitHistory,
+  error: Schema.Union([EnvironmentAuthorizationError, UsageLimitHistoryError]),
 });
 
 /**
@@ -1925,6 +1936,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerCheckOtlpEndpointRpc,
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
+  WsServerGetUsageLimitHistoryRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
