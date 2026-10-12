@@ -126,15 +126,7 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
         },
         updateProviders: providers.updateAll,
         updateServers: async () => {
-          await Promise.all(
-            servers.map((server) =>
-              updateServer(
-                continueThreads === undefined
-                  ? server
-                  : { ...server, continueThreadsAfterServerUpdate: continueThreads },
-              ),
-            ),
-          );
+          await Promise.all(servers.map((server) => updateServer(server)));
         },
       });
     },
