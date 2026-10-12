@@ -13,7 +13,9 @@ import { ListSection } from "../../components/ListSection";
 import { ListToggleRow } from "../../components/ListToggleRow";
 import { MaterialButton } from "../../components/MaterialButton";
 import { MaterialIconButton } from "../../components/MaterialIconButton";
+import { MaterialFloatingActionButton } from "../../components/MaterialFloatingActionButton";
 import { MaterialSearchField } from "../../components/MaterialSearchField";
+import { LoadingStrip } from "../../components/LoadingStrip";
 import { Notice } from "../../components/Notice";
 import { NumberField } from "../../components/NumberField";
 import { ScreenHeader } from "../../components/ScreenHeader";
@@ -227,6 +229,18 @@ export function ComponentCatalogScreen() {
               >
                 <Chip label="Menu" trailingIcon="chevron.down" />
               </ControlPillMenu>
+            </View>
+            <View className="relative h-3 overflow-hidden rounded-full bg-subtle">
+              <LoadingStrip progress={0.6} />
+            </View>
+            <View className="items-start">
+              <MaterialFloatingActionButton
+                label="New thread"
+                icon="plus"
+                variant="extended"
+                tone="primary"
+                onPress={() => setSheet(true)}
+              />
             </View>
           </View>
         ) : null}
