@@ -296,7 +296,12 @@ export function PoolForecast({
           size="xs"
           className="ms-auto"
           aria-expanded={settingsOpen}
-          onClick={() => setSettingsOpen((open) => !open)}
+          onClick={() => {
+            setSettingsOpen((open) => !open);
+            // Editing a drain rate can change which window runs dry first; keep
+            // the card on the window being edited instead of following it.
+            setPickedWindow(windowKey(window));
+          }}
         >
           <ChevronRightIcon className={settingsOpen ? "rotate-90" : undefined} aria-hidden />
           Forecast settings
