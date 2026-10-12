@@ -148,7 +148,7 @@ function HostedPromptLinkLanding({
         </Alert>
       ) : null}
       {prompt !== null ? (
-        <pre className="mt-5 max-h-72 overflow-auto rounded-lg border border-border bg-background p-3 font-sans text-sm whitespace-pre-wrap">
+        <pre className="mt-5 max-h-72 overflow-auto rounded-lg border border-border bg-background p-3 text-sm whitespace-pre-wrap">
           {prompt.text}
         </pre>
       ) : null}

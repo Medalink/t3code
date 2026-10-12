@@ -24,6 +24,7 @@ import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { newProjectId } from "~/lib/utils";
 import {
+  useAllEnvironmentProjectSnapshotsReady,
   useAllEnvironmentShellsBootstrapped,
   useProjects,
   useThreadShells,
@@ -64,7 +65,11 @@ const openedLinkKeys = new Set<string>();
 export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
   const locationKey = useLocation({ select: (location) => location.state.__TSR_key ?? "" });
   const navigate = useNavigate();
-  const bootstrapped = useAllEnvironmentShellsBootstrapped();
+  // Projects arrive after the shells say they are bootstrapped, and the link needs them to
+  // find its repository, so it waits for both.
+  const shellsReady = useAllEnvironmentShellsBootstrapped();
+  const projectsReady = useAllEnvironmentProjectSnapshotsReady();
+  const ready = shellsReady && projectsReady;
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
@@ -241,8 +246,8 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
 
   // Runs once per link, when the shells are in. Later shell updates must not open it again.
   useEffect(() => {
-    if (bootstrapped && state.status === "opening") start();
-  }, [bootstrapped, state.status]);
+    if (ready && state.status === "opening") start();
+  }, [ready, state.status]);
 
   switch (state.status) {
     case "opening":
