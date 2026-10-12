@@ -54,6 +54,7 @@ vi.mock("../../state/usage", () => ({
     isPartial: false,
     refresh: async () => undefined,
   }),
+  useUsageLimitHistory: () => new Map(),
 }));
 vi.mock("./usagePagePreferences", () => ({
   readUsagePagePreferences: () => ({ metric: state.metric, windowDays: 30 }),

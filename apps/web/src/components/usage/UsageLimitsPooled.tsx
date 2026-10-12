@@ -7,14 +7,17 @@ import {
   cursorUsageWindowDetails,
   displayLimitWindows,
   formatResetsIn,
+  indexLimitHistory,
   type LimitAccount,
+  type LimitHistoryIndex,
   type LimitPool,
   type LimitPoolMember,
   type LimitPoolWindow,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { AlertTriangleIcon, ExternalLinkIcon, TicketIcon } from "lucide-react";
-import { Fragment, type ReactNode, useState } from "react";
+import type { EnvironmentId, UsageLimitHistory } from "@t3tools/contracts";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 
 import { ensureLocalApi } from "../../localApi";
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -34,6 +37,8 @@ import {
   useResetCredit,
 } from "./UsageLimits";
 import { AccountAvatar, AccountName, accountInitials } from "./UsageLimitsAccount";
+import { PoolForecast } from "./UsageLimitsForecast";
+import { LimitLedger } from "./UsageLimitsLedger";
 
 function Row({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
@@ -443,7 +448,15 @@ function PoolWindowCard({
   );
 }
 
-function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+function PoolSection({
+  pool,
+  history,
+  now,
+}: {
+  readonly pool: LimitPool;
+  readonly history: LimitHistoryIndex;
+  readonly now: number;
+}) {
   const color = barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
   const windows = displayLimitWindows(pool);
@@ -459,6 +472,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
         />
         {label}
       </h2>
+      <PoolForecast pool={pool} history={history} now={now} color={color} />
       {windows.map((window) => {
         const details = pool.driver === "cursor" ? cursorUsageWindowDetails(window.id) : undefined;
         return (
@@ -472,6 +486,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
           />
         );
       })}
+      <LimitLedger pool={pool} now={now} />
     </section>
   );
 }
@@ -483,14 +498,23 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
  */
 export function UsageLimitsPooled({
   presentations,
+  history,
   now,
   cursorPrompt,
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
+  readonly history: ReadonlyMap<EnvironmentId, UsageLimitHistory>;
   readonly now: number;
   readonly cursorPrompt?: ReactNode;
 }) {
-  const pools = collectLimitPools(collectLimitAccounts(presentations), now);
+  const pools = useMemo(
+    () => collectLimitPools(collectLimitAccounts(presentations), now),
+    [presentations, now],
+  );
+  const historyIndex = useMemo(
+    () => indexLimitHistory(presentations, history),
+    [presentations, history],
+  );
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
   const cursorPromptAt =
@@ -508,7 +532,7 @@ export function UsageLimitsPooled({
       {pools.map((pool, index) => (
         <Fragment key={pool.driver}>
           {index === cursorPromptAt ? cursorPrompt : null}
-          <PoolSection pool={pool} now={now} />
+          <PoolSection pool={pool} history={historyIndex} now={now} />
         </Fragment>
       ))}
       {cursorPromptAt === pools.length ? cursorPrompt : null}
