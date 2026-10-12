@@ -740,11 +740,12 @@ export function limitAccountStatus(
     return spent ? [resetsAt] : [];
   });
   if (resets.length === 0) return { exhausted: false, lastSeenAt };
-  const backAt = resets.reduce<number | null>(
-    (latest, at) => (latest === null || at === null ? null : Math.max(latest, at)),
-    Number.NEGATIVE_INFINITY,
-  );
-  return { exhausted: true, backAt, lastSeenAt };
+  const clocks = resets.flatMap((at) => (at === null ? [] : [at]));
+  return {
+    exhausted: true,
+    backAt: clocks.length === resets.length ? Math.max(...clocks) : null,
+    lastSeenAt,
+  };
 }
 
 /** The one-line status under a provider heading when there are no bars to draw. */
