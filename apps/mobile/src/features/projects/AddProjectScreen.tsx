@@ -1420,7 +1420,11 @@ export function AddProjectDestinationScreen(props: {
             title,
             cloning: "1",
             ...(prompt
-              ? { draftId: await draftWithPrompt(environment.environmentId, projectId, prompt) }
+              ? // Without its prompt the draft still opens on the cloned project.
+                await draftWithPrompt(environment.environmentId, projectId, prompt).then(
+                  (draftId) => ({ draftId }),
+                  () => ({}),
+                )
               : {}),
           });
         }

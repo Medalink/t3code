@@ -24,7 +24,12 @@ export async function applyLinkedPromptToThreadDraft(
   prompt: LinkedPrompt,
   notice: string,
 ): Promise<void> {
-  await waitForComposerDraftsLoaded();
+  try {
+    await waitForComposerDraftsLoaded();
+  } catch {
+    Alert.alert("Could not open link", "Drafts could not be loaded, so the prompt was not added.");
+    return;
+  }
   const action = linkedThreadDraftAction(getComposerDraftSnapshot(draftKey).text, prompt.text);
   if (action !== "ask") {
     if (action === "fill") setComposerDraftText(draftKey, prompt.text);

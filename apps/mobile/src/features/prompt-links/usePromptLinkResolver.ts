@@ -187,7 +187,7 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
 
   // Clone needs a tap on the destination screen, which then opens a draft in the cloned project
   // holding the prompt. A pull request's prompt belongs on its branch, which only exists once the
-  // clone is done, so that link has to be opened again.
+  // clone is done, so that link, like any on an older server, has to be opened again.
   const cloneRepository = (repository: PromptLinkRepository, request: LinkedDraftRequest) => {
     const environmentId =
       flow.selectedEnvironmentId ?? connectedEnvironments[0]?.environmentId ?? null;
@@ -195,7 +195,12 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
       Alert.alert("Could not clone", "Connect an environment first.");
       return;
     }
-    const prompt = request.pullRequest === null ? request.prompt : null;
+    // Only a tracked clone opens a draft the prompt can ride into; older servers do not.
+    const prompt =
+      request.pullRequest === null &&
+      serverConfigs.get(environmentId)?.environment.capabilities.projectCloneTracking === true
+        ? request.prompt
+        : null;
     const name = promptLinkRepositoryName(repository);
     navigation.dispatch(
       StackActions.push("AddProjectDestination", {
