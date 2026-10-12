@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { I18nManager, Platform, Pressable, View } from "react-native";
+import { I18nManager, Platform, Pressable, useWindowDimensions, View } from "react-native";
 import Animated, {
   Easing,
   ReduceMotion,
@@ -9,7 +9,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { AppText as Text } from "./AppText";
 import { cn } from "../lib/cn";
-import { MaterialSegmentedControl } from "./MaterialSegmentedControl";
 import type { SegmentedControlProps } from "./SegmentedControl.types";
 
 export type { SegmentedControlProps } from "./SegmentedControl.types";
@@ -17,7 +16,10 @@ export type { SegmentedControlProps } from "./SegmentedControl.types";
 export function SegmentedControl<Value extends number | string>(
   props: SegmentedControlProps<Value>,
 ) {
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale >= 1.8;
   const compact = props.size === "compact";
+  const count = Math.max(1, props.options.length);
   const [width, setWidth] = useState(0);
   const index = Math.max(
     0,
@@ -36,29 +38,27 @@ export function SegmentedControl<Value extends number | string>(
   const indicatorStyle = useAnimatedStyle(() => ({
     transform: [
       {
-        translateX:
-          ((position.value * width) / props.options.length) * (I18nManager.isRTL ? -1 : 1),
+        translateX: ((position.value * width) / count) * (I18nManager.isRTL ? -1 : 1),
       },
     ],
   }));
-  if (Platform.OS === "android") {
-    return <MaterialSegmentedControl {...props} />;
-  }
   return (
     <View
       accessible={false}
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
       className={cn(
-        "flex-row overflow-hidden",
-        "rounded-full border-continuous bg-card",
+        stacked ? "overflow-hidden" : "flex-row overflow-hidden",
+        "rounded-[22px] border-continuous bg-subtle",
         props.className,
       )}
     >
-      <Animated.View
-        pointerEvents="none"
-        className="absolute inset-y-0 rounded-full bg-secondary"
-        style={[{ width: `${100 / props.options.length}%`, start: 0 }, indicatorStyle]}
-      />
+      {!stacked ? (
+        <Animated.View
+          pointerEvents="none"
+          className="absolute inset-y-0 rounded-[22px] bg-primary"
+          style={[{ width: `${100 / count}%`, start: 0 }, indicatorStyle]}
+        />
+      ) : null}
       {props.options.map((option) => {
         const active = option.value === props.selected;
         return (
@@ -69,14 +69,16 @@ export function SegmentedControl<Value extends number | string>(
             accessibilityState={{ selected: active }}
             onPress={() => props.onSelect(option.value)}
             className={cn(
-              "flex-1 items-center justify-center rounded-full",
-              compact ? "h-9" : "h-11",
+              "min-w-0 items-center justify-center rounded-[22px] px-2 py-2",
+              !stacked && "flex-1",
+              stacked && active && "bg-primary",
+              compact ? "min-h-9 android:min-h-10" : "min-h-11",
             )}
           >
             <Text
               className={cn(
-                compact ? "text-xs" : "text-sm",
-                active ? "font-t3-medium text-secondary-foreground" : "text-foreground-muted",
+                compact ? "text-center text-xs" : "text-center text-sm",
+                active ? "font-t3-medium text-primary-foreground" : "text-foreground-muted",
               )}
             >
               {option.label}
