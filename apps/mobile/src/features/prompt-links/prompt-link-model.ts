@@ -72,6 +72,21 @@ export function promptLinkScratchEnvironmentId<Id extends string>(
   );
 }
 
+/** Each environment once, by its most recently updated thread first. */
+export function latestThreadEnvironmentIds<Id extends string>(
+  threads: ReadonlyArray<{ readonly environmentId: Id; readonly updatedAt: string }>,
+): ReadonlyArray<Id> {
+  const latest = new Map<Id, string>();
+  for (const thread of threads) {
+    if (thread.updatedAt > (latest.get(thread.environmentId) ?? "")) {
+      latest.set(thread.environmentId, thread.updatedAt);
+    }
+  }
+  return Array.from(latest.keys()).sort((left, right) =>
+    (latest.get(right) ?? "").localeCompare(latest.get(left) ?? ""),
+  );
+}
+
 /** `owner/name`, as the user knows the repository. */
 export const promptLinkRepositoryName = (repository: PromptLinkRepository) =>
   `${repository.owner}/${repository.name}`;

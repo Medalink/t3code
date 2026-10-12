@@ -40,6 +40,7 @@ import {
   clearedPromptLinkParams,
   promptLinkNotice,
   promptLinkRepositoryName,
+  latestThreadEnvironmentIds,
   promptLinkScratchEnvironmentId,
   promptLinkSearchFromParams,
 } from "./prompt-link-model";
@@ -74,7 +75,7 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
   const waitingForShells =
     catalogState.isLoadingConnections ||
     catalogState.hasPendingShellSnapshot ||
-    (catalogState.hasConnectingEnvironment && catalogState.connectionError === null);
+    catalogState.hasConnectingEnvironment;
 
   // Writes the prompt and the requested model into a draft. Returns true when the link named a
   // model the user cannot use, so their default stands in.
@@ -145,9 +146,7 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
   const openScratchDraft = async (request: LinkedDraftRequest) => {
     const environmentId = promptLinkScratchEnvironmentId(
       // Machines by their latest thread, scratch threads included.
-      [...threads]
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-        .map((thread) => thread.environmentId),
+      latestThreadEnvironmentIds(threads),
       connectedEnvironments
         .filter(
           (environment) =>
@@ -205,7 +204,10 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
     if (!request.prompt) return;
     showPromptLinkNotice(
       [
-        promptLinkNotice({ hiddenCharacters: request.prompt.hiddenCharacters }),
+        promptLinkNotice({
+          hiddenCharacters: request.prompt.hiddenCharacters,
+          modelUnavailable: prompt !== null && request.provider !== null,
+        }),
         prompt
           ? "The prompt opens in a new task once the clone starts."
           : "Open the link again after the clone to get the prompt.",

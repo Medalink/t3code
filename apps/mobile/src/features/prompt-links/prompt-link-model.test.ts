@@ -2,6 +2,7 @@ import { parseNewThreadLink } from "@t3tools/shared/promptLinks";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  latestThreadEnvironmentIds,
   linkedThreadDraftAction,
   promptLinkNotice,
   promptLinkScratchEnvironmentId,
@@ -59,5 +60,17 @@ describe("promptLinkScratchEnvironmentId", () => {
     expect(promptLinkScratchEnvironmentId(["a", "b", "c"], ["c", "b"])).toBe("b");
     expect(promptLinkScratchEnvironmentId(["a"], ["c"])).toBe("c");
     expect(promptLinkScratchEnvironmentId(["a"], [])).toBeNull();
+  });
+});
+
+describe("latestThreadEnvironmentIds", () => {
+  it("orders machines by their latest thread", () => {
+    expect(
+      latestThreadEnvironmentIds([
+        { environmentId: "a", updatedAt: "2026-01-02T00:00:00.000Z" },
+        { environmentId: "b", updatedAt: "2026-01-03T00:00:00.000Z" },
+        { environmentId: "a", updatedAt: "2026-01-04T00:00:00.000Z" },
+      ]),
+    ).toEqual(["a", "b"]);
   });
 });
