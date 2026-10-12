@@ -103,7 +103,7 @@ export function PoolForecast({
   const [preferences, setPreferences] = useLimitsForecastPreferences();
   const [pickedWindow, setPickedWindow] = useState<string | null>(null);
   const [view, setView] = useState<ForecastChartView>("remaining");
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsFor, setSettingsFor] = useState<string | null>(null);
 
   const forecasts = useMemo(
     () =>
@@ -127,18 +127,14 @@ export function PoolForecast({
       }),
     [pool, history, now, preferences],
   );
+  const shownWindow = pickedWindow ?? settingsFor;
   const selected =
-    forecasts.find((entry) => windowKey(entry.window) === pickedWindow) ?? bindingWindow(forecasts);
-  const domain = useMemo(
-    () =>
-      selected
-        ? { from: now - selected.options.lookbackMs, to: now + selected.options.horizonMs }
-        : null,
-    [selected, now],
-  );
-  if (!selected || !domain) return null;
+    forecasts.find((entry) => windowKey(entry.window) === shownWindow) ?? bindingWindow(forecasts);
+  if (!selected) return null;
 
-  const { window, forecast, horizonDays } = selected;
+  const { window, forecast, horizonDays, options } = selected;
+  const domain = { from: now - options.lookbackMs, to: now + options.horizonMs };
+  const settingsOpen = settingsFor === windowKey(window);
   const hint = BASIS_HINT[forecast.drain.basis];
   const refill = nextRefill(selected);
 
@@ -285,10 +281,7 @@ export function PoolForecast({
           size="xs"
           className="ms-auto"
           aria-expanded={settingsOpen}
-          onClick={() => {
-            setSettingsOpen((open) => !open);
-            setPickedWindow(windowKey(window));
-          }}
+          onClick={() => setSettingsFor(settingsOpen ? null : windowKey(window))}
         >
           <ChevronRightIcon className={settingsOpen ? "rotate-90" : undefined} aria-hidden />
           Forecast settings
@@ -296,11 +289,10 @@ export function PoolForecast({
       </div>
       {settingsOpen ? (
         <ForecastSettings
-          key={windowKey(window)}
           entry={selected}
           history={history}
-          override={preferences.drainOverrides[overrideKey(pool.driver, window)] ?? null}
-          spillover={preferences.spillover ?? true}
+          override={options.drainOverridePerHour}
+          spillover={options.spillover}
           onOverrideChange={(perHour) =>
             setPreferences((current) => {
               const key = overrideKey(pool.driver, window);
