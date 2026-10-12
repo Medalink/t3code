@@ -232,8 +232,9 @@ export function LimitForecastChart({
     [forecast, view, domain, now],
   );
   const [hover, setHover] = useState<number | null>(null);
-  const hoverAt = hover === null ? null : domain.from + hover * (domain.to - domain.from);
-  const hovered = hoverAt === null ? null : forecastValueAt(forecast, view, hoverAt, now);
+  const readout =
+    hover === null ? null : { share: hover, at: domain.from + hover * (domain.to - domain.from) };
+  const hovered = readout && forecastValueAt(forecast, view, readout.at, now);
   const percentOf = (y: number) => `${(y / VIEW_HEIGHT) * 100}%`;
   const formatTick = (at: number) =>
     geometry.xTickUnit === "day"
@@ -360,15 +361,16 @@ export function LimitForecastChart({
           >
             Now
           </span>
-          {hover === null || hoverAt === null ? null : (
+          {readout === null ? null : (
             <div
               className="surface-glass pointer-events-none absolute top-2 z-10 min-w-32 rounded-xl border border-border/50 px-2.5 py-2 text-xs whitespace-nowrap shadow-lg"
               style={{
-                left: `${hover * 100}%`,
-                transform: hover > 0.5 ? "translateX(calc(-100% - 12px))" : "translateX(12px)",
+                left: `${readout.share * 100}%`,
+                transform:
+                  readout.share > 0.5 ? "translateX(calc(-100% - 12px))" : "translateX(12px)",
               }}
             >
-              <div className="mb-1 text-muted-foreground">{formatMoment(hoverAt)}</div>
+              <div className="mb-1 text-muted-foreground">{formatMoment(readout.at)}</div>
               {hovered ? (
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">
