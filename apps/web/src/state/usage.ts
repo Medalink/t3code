@@ -310,12 +310,6 @@ const usageLimitHistoryAtom = Atom.family((key: string) =>
 
 const NO_LIMIT_HISTORY: ReadonlyMap<EnvironmentId, UsageLimitHistory> = new Map();
 
-/**
- * Every listed environment's recorded quota history. One that fails, or runs
- * a server without history, is absent: the forecast falls back to pace. The
- * request window moves with `now` a quarter hour at a time, and until the new
- * window answers the previous answer stands in, so the chart does not blank.
- */
 export function useUsageLimitHistory(
   environmentIds: readonly EnvironmentId[],
   now: number,
@@ -327,7 +321,6 @@ export function useUsageLimitHistory(
   });
   const results = useAtomValue(usageLimitHistoryAtom(key));
   const [kept, setKept] = useState(NO_LIMIT_HISTORY);
-  // Stored during render, as in `useUsage`, so the stand-in never lags a frame.
   const answered = results.flatMap(({ environmentId, history }) =>
     history === null ? [] : [[environmentId, history] as const],
   );

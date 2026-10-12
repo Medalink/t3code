@@ -38,7 +38,6 @@ const observation = (overrides: Partial<UsageLimitObservation> = {}): UsageLimit
   ...overrides,
 });
 
-/** Runs one recorder over `batches` and returns once it has handled the last one. */
 const recordAll = (batches: ReadonlyArray<ReadonlyArray<UsageLimitObservation>>) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -76,7 +75,6 @@ const layerHistory = UsageLimitHistory.layer.pipe(
   ),
 );
 
-/** Starts the service half an hour before `now`, so its startup prune keeps that half hour. */
 const read = (input: UsageLimitHistoryInput) =>
   Effect.gen(function* () {
     yield* TestClock.setTime(now - 30 * MINUTE);
@@ -216,7 +214,6 @@ it.effect("read clamps since to retention and caps points per series", () =>
       [observation({ sampledAt: now - 40 * DAY, resetsAt: null })],
       [observation({ sampledAt: now - 35 * DAY - 20 * MINUTE, resetsAt: null })],
       [observation({ sampledAt: now - 35 * DAY - 10 * MINUTE, usedPercent: 41, resetsAt: null })],
-      // Hourly keepalives over 34 days: 816 stored rows.
       ...Array.from({ length: 816 }, (_, index) => [
         observation({ sampledAt: now - 34 * DAY + index * HOUR, resetsAt: null }),
       ]),

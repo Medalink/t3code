@@ -84,7 +84,6 @@ export interface LimitForecast {
   readonly emptyAt: number | null;
 }
 
-/** Fixed per quarter hour so the query atom key is stable between refreshes. */
 export function limitHistoryRequest(now: number): UsageLimitHistoryInput {
   const floor = now - (now % (15 * MINUTE));
   return { sinceMs: floor - HISTORY_REQUEST_DAYS * DAY };
@@ -116,13 +115,10 @@ interface MemberFit {
   readonly basis: "fitted" | "pace";
 }
 
-/** One member's window as the projection sees it at `now`. */
 interface Member {
   readonly remaining: number;
-  /** Next reset strictly after `now`, or null without a clock. */
   readonly resetAt: number | null;
   readonly periodMs: number | null;
-  /** Recorded and live readings merged, clamped to `now`. */
   readonly periods: readonly LimitPeriod[];
   readonly fit: MemberFit | null;
 }
@@ -134,7 +130,6 @@ function prepareMember(member: LimitPoolMember, history: LimitHistoryIndex, now:
       ? window.windowDurationMins * MINUTE
       : null;
   const reportedReset = resetMillis(window);
-  // No probe since the reset, so the account has already reset.
   const rolled = reportedReset !== null && reportedReset <= now;
   const resetAt =
     reportedReset === null
@@ -162,8 +157,6 @@ function prepareMember(member: LimitPoolMember, history: LimitHistoryIndex, now:
     live,
   ]);
   const current = periods.at(-1)!;
-  // Rolled with no reading in the new period: fit the period that just
-  // ended against its own anchor, so a week of history is not thrown away.
   const anchorReset = rolled ? current.resetsAt : resetAt;
   const anchor =
     anchorReset !== null && periodMs !== null
@@ -178,11 +171,6 @@ function prepareMember(member: LimitPoolMember, history: LimitHistoryIndex, now:
   };
 }
 
-/**
- * Recency-weighted least-squares slope through the period anchor and its
- * readings, in % per hour. With only the anchor and the live reading it is
- * today's pace maths; readings refine it.
- */
 function fitRate(
   anchor: LimitSample | null,
   readings: readonly LimitSample[],
@@ -225,12 +213,6 @@ function periodAt(periods: readonly LimitPeriod[], at: number): LimitPeriod | nu
   return found;
 }
 
-/**
- * Used percent at an instant: linear between readings, held after the last
- * one, and 0 once the period's recorded reset has passed. `side` decides
- * which value the instant of the reset itself takes, so a reset can be drawn
- * as a vertical edge. Null before the first reading.
- */
 function usedAt(
   periods: readonly LimitPeriod[],
   at: number,
@@ -258,7 +240,6 @@ function usedAt(
   return last.usedPercent;
 }
 
-/** Recorded resets that take effect inside `[from, to]`, in time order. */
 function resetCrossings(periods: readonly LimitPeriod[], from: number, to: number): number[] {
   return periods.flatMap((period) => {
     const reset = period.resetsAt;
@@ -276,10 +257,6 @@ function remainingTotal(members: readonly Member[], at: number, side: "before" |
   return members.reduce((sum, member) => sum + 100 - (usedAt(member.periods, at, side) ?? 0), 0);
 }
 
-/**
- * Solid line over `[from, to]`, only where every member has a reading, split
- * where any member's consecutive readings are further apart than `GAP_MS`.
- */
 function observe(
   members: readonly Member[],
   from: number,
@@ -337,12 +314,6 @@ interface Simulated {
   readonly share: number;
 }
 
-/**
- * Event-driven projection: the pool drains at `perHour` spread over the
- * members by share, each member steps back to 100 at its own reset, and the
- * line gets a point at every breakpoint rather than on a grid. A reset is
- * two points at one instant.
- */
 function project(
   members: readonly Member[],
   shares: readonly number[],
@@ -409,7 +380,6 @@ function niceDuration(raw: number): number {
   return DRAIN_BUCKET_STEPS.find((step) => step >= raw) ?? DRAIN_BUCKET_STEPS.at(-1)!;
 }
 
-/** Points a member consumed between two instants, counting across its recorded resets. */
 function consumedBetween(member: Member, from: number, to: number): number {
   const edges = [
     from,
@@ -460,7 +430,6 @@ export function forecastPoolWindow(
   const observed = members.length > 0 ? observe(members, now - lookbackMs, now) : [];
   const drainSeries = members.length > 0 ? drainBuckets(members, now - lookbackMs, now) : [];
 
-  // A clocked member with no fit of its own drains like the others do.
   const fitted = members.flatMap((member) => (member.fit ? [member.fit.rate] : []));
   const meanRate = fitted.length > 0 ? fitted.reduce((sum, r) => sum + r, 0) / fitted.length : null;
   const rates = members.map((member) =>

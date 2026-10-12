@@ -574,8 +574,6 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(layerPullRequestService),
     Layer.provide(ProjectionStoreV2.layer),
   ),
-  // Records quota windows off the provider and hub streams for Limits history.
-  // It reads the SqlClient, registry, and sources provided below.
   UsageLimitHistory.layer,
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,

@@ -1129,8 +1129,6 @@ export function createServerEnvironmentAtoms<R, E>(
           ),
         ),
     }),
-    // History moves only when a window does, and the live snapshot supplies
-    // the "now" reading, so a minute of staleness never shows.
     usageLimitHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:usage-limit-history",
       tag: WS_METHODS.serverGetUsageLimitHistory,

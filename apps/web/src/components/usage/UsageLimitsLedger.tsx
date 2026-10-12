@@ -17,10 +17,6 @@ import { RefreshIcon } from "../ui/refresh-icon";
 import { LimitWindows, ResetCredits } from "./UsageLimits";
 import { AccountAvatar } from "./UsageLimitsAccount";
 
-/**
- * Where a row's refresh goes: the instances that report the account, or the
- * whole environment when only a hub does, since that re-reads its hubs.
- */
 function refreshTargets(account: LimitAccount) {
   const native = account.reportedBy.filter((reporter) => reporter.instanceId !== null);
   const targets = native.length > 0 ? native : account.reportedBy;

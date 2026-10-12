@@ -47,7 +47,6 @@ export interface ForecastChartGeometry {
     readonly area: string;
   }>;
   readonly projected: { readonly line: string; readonly area: string } | null;
-  /** The reading at `now`, marked with a dot so a lone reading still shows. */
   readonly current: ChartPoint | null;
   readonly nowX: number;
   readonly yMax: number;
@@ -69,7 +68,6 @@ function areaPath(points: readonly ChartPoint[]): string {
   return `${linePath(points)} L${last.x.toFixed(2)},${VIEW_HEIGHT} L${first.x.toFixed(2)},${VIEW_HEIGHT} Z`;
 }
 
-/** Each drain bucket as a flat step over the span it measured; points sit at bucket ends. */
 function drainSteps(series: readonly ForecastPoint[]): ForecastPoint[] {
   const first = series[0];
   const second = series[1];
@@ -81,10 +79,7 @@ function drainSteps(series: readonly ForecastPoint[]): ForecastPoint[] {
   ]);
 }
 
-/**
- * Local-time gridlines: midnights for multi-day spans, round hours for a day.
- * Steps by calendar date, not 24 h, so a DST change does not drift the labels.
- */
+/** Steps by calendar date, not 24 h, so a DST change does not drift the labels. */
 function timeTicks(domain: ForecastChartDomain) {
   const span = domain.to - domain.from;
   const step = X_TICK_STEPS.find((candidate) => span / candidate <= MAX_X_TICKS) ?? 7 * DAY;
@@ -169,7 +164,6 @@ export function forecastChartGeometry(
   };
 }
 
-/** The value a polyline passes through at `at`; on a vertical edge, the value after it. */
 function valueOnLine(points: readonly ForecastPoint[], at: number): number | null {
   for (let index = points.length - 1; index > 0; index -= 1) {
     const left = points[index - 1];
@@ -217,12 +211,6 @@ function formatPercent(value: number, view: ForecastChartView): string {
   return view === "remaining" ? `${Math.round(value)}%` : `${formatDrainPerHour(value)}/h`;
 }
 
-/**
- * Remaining quota (or drain rate) over time for one pooled window: observed
- * solid, projected dashed, with a marker at `now`. Hover reads out a moment.
- * Rendering needs no refs or layout reads; the hover position comes from the
- * pointer event itself.
- */
 export function LimitForecastChart({
   forecast,
   view,

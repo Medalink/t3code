@@ -33,17 +33,12 @@ export interface UsageLimitReading {
 
 export interface UsageLimitObservation extends UsageLimitSeriesIdentity, UsageLimitReading {}
 
-/**
- * The `subject` column. Keys are written in a fixed order so one reporter
- * always maps to one row under the UNIQUE constraint.
- */
 export function encodeSubject(subject: UsageLimitHistorySubject): string {
   return subject._tag === "instance"
     ? JSON.stringify({ _tag: "instance", instanceId: subject.instanceId })
     : JSON.stringify({ _tag: "source", sourceId: subject.sourceId, accountId: subject.accountId });
 }
 
-/** Stable map key for a series; mirrors the table's UNIQUE constraint. */
 export function seriesKey(identity: UsageLimitSeriesIdentity): string {
   return JSON.stringify([
     encodeSubject(identity.subject),
@@ -60,7 +55,6 @@ function observeLimits(
   identity: Omit<UsageLimitSeriesIdentity, "windowKind" | "windowId" | "credentialFingerprint">,
   limits: ServerProviderUsageLimits,
 ): UsageLimitObservation[] {
-  // Same skip rule the Limits view applies, so history holds only what it can draw.
   if (limitsNotice(limits) !== null) return [];
   const sampledAt = Date.parse(limits.checkedAt);
   if (!Number.isFinite(sampledAt)) return [];
@@ -118,12 +112,6 @@ export function observeSources(
 export const KEEPALIVE_MS = 60 * 60_000;
 const MIN_USED_DELTA = 0.5;
 
-/**
- * Whether a reading carries news the last stored row lacks. A failed probe
- * republishes old limits under the old `checkedAt`, and every probe bumps
- * `checkedAt` even when nothing moved, so only content and the hourly
- * keepalive count. The keepalive proves a flat stretch was flat.
- */
 export function shouldRecord(
   last: UsageLimitReading | undefined,
   next: UsageLimitReading,
@@ -137,15 +125,6 @@ export function shouldRecord(
   );
 }
 
-/**
- * One series' rows, oldest first, thinned to at most `maxPoints` and grouped
- * into periods. Time from `sinceMs` to `nowMs` is cut into equal buckets
- * (at least `requestedResolutionMs` wide) and the last reading of each is
- * kept, plus the first and last reading of every period so a reset keeps its
- * edge. Rows before `sinceMs` (the carry-in) share one bucket. When every
- * reading opens its own period, as a rolling window's moving reset does, the
- * edges alone would exceed the cap, so only the buckets are kept.
- */
 export function toHistoryPeriods(
   rows: ReadonlyArray<UsageLimitReading>,
   options: {
@@ -156,7 +135,6 @@ export function toHistoryPeriods(
   },
 ): UsageLimitHistoryPeriod[] {
   const { sinceMs, nowMs, maxPoints } = options;
-  // One bucket is reserved for the carry-in row before `sinceMs`.
   const resolutionMs = Math.max(
     options.requestedResolutionMs || 1,
     Math.ceil(Math.max(1, nowMs - sinceMs) / (maxPoints - 2)),
@@ -179,7 +157,6 @@ export function toHistoryPeriods(
 
   const periods: Array<{ resetsAtMs: number | null; points: Array<readonly [number, number]> }> =
     [];
-  // A period whose opening reading was thinned away still starts at its next kept reading.
   let opened = false;
   rows.forEach((row, index) => {
     opened ||= opensPeriod[index]!;

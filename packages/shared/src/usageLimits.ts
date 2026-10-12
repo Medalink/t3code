@@ -126,7 +126,6 @@ function accountKey(
   return credentialFingerprint ? `${driver}:credential:${credentialFingerprint}` : null;
 }
 
-/** What identifies the account behind a reading, live or recorded. */
 interface AccountReport {
   readonly driver: ServerProvider["driver"];
   readonly email?: string | undefined;
@@ -189,11 +188,6 @@ function accountKeyResolver(reports: Iterable<AccountReport>) {
   };
 }
 
-/**
- * The resolver built from what is signed in right now, every enabled login
- * included whether or not it could be read. History resolves through it too,
- * so a recorded series can never change a live key.
- */
 function liveAccountKeyResolver(presentations: LimitPresentations) {
   return accountKeyResolver(
     [...presentations.values()].flatMap((presentation) => [
@@ -631,13 +625,6 @@ export type LimitHistoryIndex = ReadonlyMap<string, ReadonlyMap<string, readonly
 const RESET_JITTER_MS = 5 * MINUTE;
 const PERIOD_DROP_PERCENT = 10;
 
-/**
- * Whether two readings belong to one period: the same reset (within five
- * minutes, or both unknown) and no drop of more than ten points. A bigger
- * drop under the same reset is a redeemed reset credit, so a new period
- * starts; a smaller dip is a stale reporter or a probe rolling back a turn
- * update, which the running max flattens.
- */
 export function samePeriod(
   previous: { readonly resetsAt: number | null; readonly usedPercent: number },
   next: { readonly resetsAt: number | null; readonly usedPercent: number },
@@ -679,13 +666,6 @@ export function foldLimitPeriods(
   return periods;
 }
 
-/**
- * Joins every environment's recorded history to the accounts
- * `collectLimitAccounts` builds from the same presentations. A series
- * resolves through the live resolver, so history never changes a live key,
- * and one whose identity no live account has (signed out, another
- * workspace) is dropped. Reporters of one account merge per period.
- */
 export function indexLimitHistory(
   presentations: LimitPresentations,
   histories: ReadonlyMap<EnvironmentId, UsageLimitHistory>,

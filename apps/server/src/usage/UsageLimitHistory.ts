@@ -99,12 +99,6 @@ export const pruneUsageLimitHistory = Effect.gen(function* () {
   );
 });
 
-/**
- * The single writer. Consumes observation batches in order and writes each
- * batch's news in one transaction. `last` holds the newest stored reading per
- * series, seeded from sqlite so a restart does not rewrite what is stored, and
- * only this fiber touches it. Tests feed `batches` directly.
- */
 export const makeRecorder = (
   batches: Stream.Stream<ReadonlyArray<UsageLimitObservation>>,
 ): Effect.Effect<void, never, SqlClient.SqlClient | Scope.Scope> =>
@@ -120,7 +114,6 @@ export const makeRecorder = (
         )
       `,
     });
-    // Starting empty only costs a few rewritten rows; every write is an upsert.
     const latest = yield* findLatest(undefined).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Could not load the latest usage limit samples", cause).pipe(
@@ -166,8 +159,6 @@ export const makeRecorder = (
         if (shouldRecord(news.get(key) ?? last.get(key), observation)) news.set(key, observation);
       }
       if (news.size === 0) return Effect.void;
-      // `last` moves only after the commit, so a rolled-back batch is retried
-      // on the next emission instead of being skipped as already stored.
       return sql.withTransaction(Effect.forEach(news.values(), write, { discard: true })).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
@@ -200,13 +191,10 @@ const make = Effect.gen(function* () {
       Stream.concat(Stream.fromEffect(registry.getProviders), registry.streamChanges).pipe(
         Stream.map(observeProviders),
       ),
-      // Replays the current set before changes.
       sources.streamChanges.pipe(Stream.map(observeSources)),
     ),
   );
 
-  // Rows since `since`, plus each series' last row before it, so a chart
-  // starts at the left edge instead of at the first reading inside the range.
   const findSince = SqlSchema.findAll({
     Request: Schema.Struct({ since: Schema.Number }),
     Result: SampleRow,

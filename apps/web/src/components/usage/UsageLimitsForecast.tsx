@@ -46,7 +46,6 @@ const BASIS_HINT: Record<ForecastDrain["basis"], string | null> = {
   insufficient: "not enough data to forecast",
 };
 
-/** Codex window ids are slots, so overrides key on the pool key like history does. */
 function overrideKey(driver: LimitPool["driver"], window: LimitPoolWindow): string {
   return `${driver}:${limitPoolKey(driver, window)}`;
 }
@@ -66,10 +65,6 @@ interface WindowForecast {
   readonly forecast: LimitForecast;
 }
 
-/**
- * The window to chart before the user picks one: the one projected to run
- * dry first, else the one with the smallest share left.
- */
 function bindingWindow(forecasts: readonly WindowForecast[]): WindowForecast | undefined {
   const emptying = forecasts.flatMap((entry) =>
     entry.forecast.emptyAt === null ? [] : [{ entry, emptyAt: entry.forecast.emptyAt }],
@@ -83,7 +78,6 @@ function bindingWindow(forecasts: readonly WindowForecast[]): WindowForecast | u
   )[0];
 }
 
-/** The next reset that hands quota back, in additive points; falls back to live clocks. */
 function nextRefill(entry: WindowForecast): { at: number; restoresPercent: number } | null {
   if (entry.forecast.nextReset) return entry.forecast.nextReset;
   const reset = entry.window.resets.find(
@@ -94,11 +88,6 @@ function nextRefill(entry: WindowForecast): { at: number; restoresPercent: numbe
     : null;
 }
 
-/**
- * How long one provider's pooled quota lasts: the total left across accounts,
- * the drain rate, and a chart of remaining quota with the projected sawtooth
- * as accounts reset. Every time comes from `now`, which the page freezes.
- */
 export function PoolForecast({
   pool,
   history,
@@ -298,8 +287,6 @@ export function PoolForecast({
           aria-expanded={settingsOpen}
           onClick={() => {
             setSettingsOpen((open) => !open);
-            // Editing a drain rate can change which window runs dry first; keep
-            // the card on the window being edited instead of following it.
             setPickedWindow(windowKey(window));
           }}
         >
@@ -333,11 +320,6 @@ export function PoolForecast({
   );
 }
 
-/**
- * A manual drain rate for when there is not enough history to estimate one,
- * and whether a dry account's share moves to the others. The estimate is
- * shown beside the override so the user can see what they are replacing.
- */
 function ForecastSettings({
   entry,
   history,

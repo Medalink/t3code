@@ -218,7 +218,6 @@ describe("toHistoryPeriods", () => {
   });
 
   it("never exceeds the cap when every reading opens its own period", () => {
-    // A rolling window: the reset moves with every probe, so samePeriod never holds.
     const rows = Array.from({ length: 100 }, (_, index) => {
       const sampledAt = sinceMs + index * 6 * 60_000;
       return reading({ sampledAt, resetsAt: sampledAt + 5 * HOUR });

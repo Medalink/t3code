@@ -4,12 +4,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  // One row per reporter, account identity, and quota window. `subject` is the
-  // reporter as JSON (`{"_tag":"instance",...}` or `{"_tag":"source",...}`).
-  // Identity is stored as reported ('' when absent) so clients resolve it with
-  // the same rules they apply to live accounts; a sign-in switch is a new row.
-  // Email, workspace, and credential fingerprint are what the provider status
-  // cache (caches/<instanceId>.json) already writes to disk today.
   yield* sql`
     CREATE TABLE IF NOT EXISTS usage_limit_series (
       series_id INTEGER PRIMARY KEY,
@@ -24,8 +18,6 @@ export default Effect.gen(function* () {
     )
   `;
 
-  // Readings, written only when their content changes or an hour has passed.
-  // Times are epoch ms: the table is range-scanned and bucketed by arithmetic.
   yield* sql`
     CREATE TABLE IF NOT EXISTS usage_limit_samples (
       series_id INTEGER NOT NULL,

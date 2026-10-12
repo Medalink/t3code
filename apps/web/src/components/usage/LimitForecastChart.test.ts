@@ -44,7 +44,6 @@ function points(path: string): Array<{ x: number; y: number }> {
 describe("forecastChartGeometry", () => {
   it("places points in proportion to time, not by index", () => {
     const geometry = forecastChartGeometry(forecast(), "remaining", domain, now);
-    // Ten hours into a forty-hour domain is a quarter of the 960-unit width.
     expect(geometry.nowX).toBe(240);
     expect(points(geometry.observed[0]!.line).map((point) => point.x)).toEqual([0, 240]);
     expect(points(geometry.projected!.line).map((point) => point.x)).toEqual([240, 480, 480, 960]);
@@ -103,7 +102,6 @@ describe("forecastChartGeometry", () => {
     const geometry = forecastChartGeometry(forecast(), "drain", domain, now);
     expect(geometry.yMax).toBeGreaterThanOrEqual(12);
     const steps = points(geometry.observed[0]!.line);
-    // Each five-hour bucket is flat across the span it measured.
     expect(steps.map((point) => point.x)).toEqual([0, 120, 120, 240]);
     expect(steps[0]!.y).toBe(steps[1]!.y);
     const projected = points(geometry.projected!.line);

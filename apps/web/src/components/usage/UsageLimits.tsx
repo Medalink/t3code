@@ -377,7 +377,6 @@ export function UsageLimitsSection({
               serverConfig: {
                 ...config,
                 providers: config.providers.filter((provider) => isVisible(provider.driver)),
-                // A hub left with no visible accounts is dropped, not reported as empty.
                 usageLimitSources: config.usageLimitSources?.flatMap((source) => {
                   const accounts = source.accounts.filter((account) => isVisible(account.driver));
                   return accounts.length === 0 && source.accounts.length > 0

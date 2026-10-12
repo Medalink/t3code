@@ -95,7 +95,6 @@ const options = (overrides: Partial<ForecastOptions> = {}): ForecastOptions => (
 
 describe("forecastPoolWindow drain", () => {
   it("fits pace from the period anchor and the live reading when there is no history", () => {
-    // 60% through a five-hour window at 30% used: 30 points over three hours.
     const forecast = forecastPoolWindow(poolWindow(member("a", {})), history(), options());
     expect(forecast.drain).toMatchObject({ basis: "pace" });
     expect(perHour(forecast)).toBeCloseTo(10);
@@ -125,7 +124,6 @@ describe("forecastPoolWindow drain", () => {
       ]),
       options(),
     );
-    // An unweighted fit gives about 14%/h and plain pace 16%/h.
     expect(forecast.drain).toMatchObject({ basis: "fitted" });
     expect(perHour(forecast)).toBeGreaterThan(17);
   });
@@ -198,7 +196,6 @@ describe("forecastPoolWindow drain", () => {
 describe("forecastPoolWindow projection", () => {
   it("steps to 100 at each recurring reset, restoring the projected amount, until the horizon", () => {
     const forecast = forecastPoolWindow(poolWindow(member("a", {})), history(), options());
-    // 10%/h from 70: 50 left at 14:00, then full again every five hours.
     expect(
       forecast.projected.map((point) => ({ ...point, value: Math.round(point.value) })),
     ).toEqual([
@@ -215,7 +212,6 @@ describe("forecastPoolWindow projection", () => {
       { at: at("2026-09-04T10:00:00.000Z"), value: 100 },
       { at: at("2026-09-04T12:00:00.000Z"), value: 80 },
     ]);
-    // Restores what the projection says is spent at 14:00, not the live 30.
     expect(forecast.nextReset).toEqual({ at: at("2026-09-03T14:00:00.000Z"), restoresPercent: 50 });
     expect(forecast.emptyAt).toBeNull();
   });
@@ -226,7 +222,6 @@ describe("forecastPoolWindow projection", () => {
       history(),
       options({ horizonMs: 8 * HOUR }),
     );
-    // 30%/h from 10: empty after twenty minutes.
     expect(forecast.projected).toEqual([
       { at: now, value: 10 },
       { at: at("2026-09-03T12:20:00.000Z"), value: 0 },
@@ -241,7 +236,6 @@ describe("forecastPoolWindow projection", () => {
   });
 
   it("snaps a floating-point residue to zero instead of spinning on an almost-empty member", () => {
-    // 61 used leaves 39 at 61/3 per hour, which does not divide out exactly.
     const forecast = forecastPoolWindow(
       poolWindow(member("a", { usedPercent: 61 })),
       history(),
@@ -271,7 +265,6 @@ describe("forecastPoolWindow projection", () => {
       options(),
     );
     expect(forecast.remainingPercent).toBe(100);
-    // 80 points over the 4.5 hours of the period that ended at 11:00.
     expect(forecast.drain).toMatchObject({ basis: "pace" });
     expect(perHour(forecast)).toBeCloseTo(80 / 4.5);
     expect(forecast.projected[0]).toEqual({ at: now, value: 100 });
@@ -282,7 +275,6 @@ describe("forecastPoolWindow projection", () => {
     ["spills a dry member's share onto the rest", true, 20],
     ["keeps members independent when spillover is off", false, 40],
   ])("%s", (_name, spillover, remainingAtEnd) => {
-    // Five hours elapsed of ten: a drains 12%/h from 40, b 6%/h from 70.
     const tenHour = { windowDurationMins: 600, resetsAt: "2026-09-03T17:00:00.000Z" };
     const forecast = forecastPoolWindow(
       poolWindow(
@@ -313,7 +305,6 @@ describe("forecastPoolWindow projection", () => {
       options(),
     );
     expect(forecast.nextReset?.at).toBe(at("2026-09-03T14:00:30.000Z"));
-    // One reset alone can restore at most 100.
     expect(forecast.nextReset?.restoresPercent).toBeGreaterThan(100);
   });
 });
@@ -459,7 +450,6 @@ describe("forecastPoolWindow drain series", () => {
       ]),
       options({ lookbackMs: 48 * HOUR }),
     );
-    // 10 before the 10:45 reset plus 5 + 10/7 after it; the rest lands in the last hour.
     expect(forecast.drainSeries.map((point) => point.at)).toEqual([
       at("2026-09-03T11:00:00.000Z"),
       now,
