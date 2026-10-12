@@ -58,23 +58,32 @@ export type PromptLinkResult<T> =
 const HIDDEN_CHARACTERS =
   // oxlint-disable-next-line no-control-regex, no-misleading-character-class -- these are the characters it removes.
   /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B\u200C\u200E\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0D\uFEFF\uFFA0\uFFF0-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0000}-\u{E0FFF}]/gu;
-// A zero-width joiner is visible work only inside an emoji sequence such as a family or a flag.
-const STRAY_ZERO_WIDTH_JOINER =
-  /(?<![\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F])\u200D|\u200D(?!\p{Extended_Pictographic})/gu;
+// Emoji and the pieces emoji sequences are built from: pictographs, symbols, skin tones, and the
+// emoji presentation selector. Numeric ranges, because Hermes lacks Unicode property escapes.
+const isEmojiPart = (codePoint: number | undefined) =>
+  codePoint !== undefined &&
+  (codePoint >= 0x1f000 || (codePoint >= 0x2190 && codePoint <= 0x2bff) || codePoint === 0xfe0f);
 
 /** Removes characters a reader cannot see, and counts them. */
 export function sanitizeLinkedPrompt(raw: string): LinkedPrompt {
-  const normalized = raw.replace(/\r\n?/g, "\n");
   let hiddenCharacters = 0;
-  const text = normalized
-    .replace(HIDDEN_CHARACTERS, () => {
+  const visible = Array.from(
+    raw.replace(/\r\n?/g, "\n").replace(HIDDEN_CHARACTERS, () => {
       hiddenCharacters++;
       return "";
+    }),
+  );
+  // A zero-width joiner is visible work only inside an emoji sequence, such as a family.
+  const text = visible
+    .filter((character, index) => {
+      if (character !== "\u200D") return true;
+      const kept =
+        isEmojiPart(visible[index - 1]?.codePointAt(0)) &&
+        isEmojiPart(visible[index + 1]?.codePointAt(0));
+      if (!kept) hiddenCharacters++;
+      return kept;
     })
-    .replace(STRAY_ZERO_WIDTH_JOINER, () => {
-      hiddenCharacters++;
-      return "";
-    });
+    .join("");
   return { text: text.trim(), hiddenCharacters };
 }
 

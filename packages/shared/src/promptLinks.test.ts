@@ -27,6 +27,7 @@ describe("sanitizeLinkedPrompt", () => {
       hiddenCharacters: 0,
     });
     expect(sanitizeLinkedPrompt("a\u200Db").hiddenCharacters).toBe(1);
+    expect(sanitizeLinkedPrompt("\u{1F468}\u200D").hiddenCharacters).toBe(1);
   });
 });
 
