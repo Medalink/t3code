@@ -1129,6 +1129,11 @@ export function createServerEnvironmentAtoms<R, E>(
           ),
         ),
     }),
+    usageLimitHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:usage-limit-history",
+      tag: WS_METHODS.serverGetUsageLimitHistory,
+      staleTimeMs: 60_000,
+    }),
     resourceTelemetry: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry",
       tag: WS_METHODS.subscribeResourceTelemetry,

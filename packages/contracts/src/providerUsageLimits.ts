@@ -176,3 +176,54 @@ export const UsageLimitsReport = Schema.Struct({
   notices: Schema.Array(Schema.String),
 });
 export type UsageLimitsReport = typeof UsageLimitsReport.Type;
+
+export const UsageLimitHistoryInput = Schema.Struct({
+  /** Epoch ms. The server clamps it to the retention window. */
+  sinceMs: Schema.Number,
+});
+export type UsageLimitHistoryInput = typeof UsageLimitHistoryInput.Type;
+
+/** Who reported the series on this environment. Matches the fallback keys `collectLimitAccounts` uses. */
+export const UsageLimitHistorySubject = Schema.Union([
+  Schema.TaggedStruct("instance", { instanceId: ProviderInstanceId }),
+  Schema.TaggedStruct("source", {
+    sourceId: UsageLimitSourceId,
+    accountId: TrimmedNonEmptyString,
+  }),
+]);
+export type UsageLimitHistorySubject = typeof UsageLimitHistorySubject.Type;
+
+export const UsageLimitHistoryPeriod = Schema.Struct({
+  /** Epoch ms of the reset that ends this period; null when the provider reports none. */
+  resetsAtMs: Schema.NullOr(Schema.Number),
+  /** `[epochMs, usedPercent]`, oldest first. Tuples keep a week of samples small over relay. */
+  points: Schema.Array(Schema.Tuple([Schema.Number, Schema.Number])),
+});
+export type UsageLimitHistoryPeriod = typeof UsageLimitHistoryPeriod.Type;
+
+export const UsageLimitHistorySeries = Schema.Struct({
+  subject: UsageLimitHistorySubject,
+  driver: ProviderDriverKind,
+  /** Identity as reported when sampled; clients resolve it with the live account resolver. */
+  email: Schema.optional(TrimmedNonEmptyString),
+  workspaceId: Schema.optional(TrimmedNonEmptyString),
+  credentialFingerprint: Schema.optional(TrimmedNonEmptyString),
+  windowId: TrimmedNonEmptyString,
+  windowKind: ServerProviderUsageWindow.fields.kind,
+  periods: ForwardCompatibleArray(UsageLimitHistoryPeriod),
+});
+export type UsageLimitHistorySeries = typeof UsageLimitHistorySeries.Type;
+
+export const UsageLimitHistory = Schema.Struct({
+  series: ForwardCompatibleArray(UsageLimitHistorySeries),
+});
+export type UsageLimitHistory = typeof UsageLimitHistory.Type;
+
+export class UsageLimitHistoryError extends Schema.TaggedError<UsageLimitHistoryError>()(
+  "UsageLimitHistoryError",
+  { detail: Schema.String },
+) {
+  override get message(): string {
+    return `Could not read quota history: ${this.detail}`;
+  }
+}

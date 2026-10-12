@@ -3,12 +3,18 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
+  type UsageLimitHistory,
+  type UsageLimitHistorySeries,
   UsageLimitSourceId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   type LimitAccount,
+  foldLimitPeriods,
+  indexLimitHistory,
+  limitAccountStatus,
+  samePeriod,
   isUsageLimitsCommand,
   collectProviderUsageLimits,
   sameUsageLimitCommandCoverage,
@@ -206,6 +212,12 @@ describe("pools", () => {
     expect(accounts).toHaveLength(1);
     expect(accounts[0]).toMatchObject({
       key: "env-a:claude",
+      identity: "claudeAgent:same@example.com",
+      reportedBy: [
+        { environmentId: "env-a", instanceId: "claude" },
+        { environmentId: "env-b", instanceId: "claude" },
+        { environmentId: "env-b", instanceId: null },
+      ],
       sourceLabel: null,
       // Desktop's read is fresher, so its credits and its redeem are the ones on show.
       redeem: { environmentId: "env-b", input: { instanceId: "claude" } },
@@ -670,6 +682,36 @@ describe("pools", () => {
     const accounts = collectLimitAccounts(input);
     expect(accounts.map((account) => account.key)).toEqual(["hub:claude-team-seat.json"]);
     expect(accounts[0]?.displayName).toBe("claude-team-seat");
+    expect(accounts[0]?.identity).toBe("hub:claude-team-seat.json");
+    expect(accounts[0]?.reportedBy).toEqual([
+      { environmentId: "env-a", instanceId: null },
+      { environmentId: "env-b", instanceId: null },
+    ]);
+  });
+
+  it("keeps an identity-less native instance per environment but one hub seat across them", () => {
+    const seat = { id: "seat.json", driver: claude, usageLimits: { checkedAt, windows: [window] } };
+    const presentation = (label: string) => ({
+      entry: { target: { label } },
+      serverConfig: {
+        providers: [provider({ usageLimits: { checkedAt, windows: [window] } })],
+        usageLimitSources: [{ ...source, accounts: [seat] }],
+      },
+    });
+    const accounts = collectLimitAccounts(
+      new Map([
+        [EnvironmentId.make("env-a"), presentation("Laptop")],
+        [EnvironmentId.make("env-b"), presentation("Desktop")],
+      ]),
+    );
+    expect(accounts.map((account) => account.reportedBy)).toEqual([
+      [{ environmentId: "env-a", instanceId: "codex" }],
+      [{ environmentId: "env-b", instanceId: "codex" }],
+      [
+        { environmentId: "env-a", instanceId: null },
+        { environmentId: "env-b", instanceId: null },
+      ],
+    ]);
   });
 
   it("pools Codex windows by kind, whichever slot reported them", () => {
@@ -806,6 +848,8 @@ describe("pools", () => {
         ...collectLimitAccounts(input),
         {
           key: "go",
+          identity: "go",
+          reportedBy: [],
           driver: claude,
           displayName: "Go",
           email: undefined,
@@ -852,6 +896,8 @@ describe("pooled account columns", () => {
   } as const;
   const account = (key: string, windows: LimitAccount["limits"]["windows"]): LimitAccount => ({
     key,
+    identity: key,
+    reportedBy: [],
     driver: ProviderDriverKind.make("claudeAgent"),
     displayName: key,
     email: undefined,
@@ -936,6 +982,8 @@ describe("pooled account columns", () => {
 describe("Cursor limit presentation", () => {
   const cursorAccount: LimitAccount = {
     key: "cursor",
+    identity: "cursor",
+    reportedBy: [],
     driver: ProviderDriverKind.make("cursor"),
     displayName: "Cursor",
     email: undefined,
@@ -1465,5 +1513,323 @@ describe("Antigravity limit presentation", () => {
       "3p-weekly",
     ]);
     expect(windows.map((window) => window.remainingPercent)).toEqual([80, 90, 10, 0]);
+  });
+});
+
+describe("samePeriod", () => {
+  const reset = Date.parse("2026-09-03T14:00:00.000Z");
+  it.each([
+    ["four minutes of reset jitter is one period", reset, 40, reset + 4 * 60_000, 41, true],
+    ["six minutes of reset jitter is a new period", reset, 40, reset + 6 * 60_000, 41, false],
+    ["a nine-point dip stays in the period", reset, 40, reset, 31, true],
+    ["an eleven-point drop starts a new period", reset, 40, reset, 29, false],
+    ["two readings without a clock share a period", null, 40, null, 45, true],
+    ["a clock appearing starts a new period", null, 40, reset, 45, false],
+  ])("%s", (_name, previousReset, previousUsed, nextReset, nextUsed, expected) => {
+    expect(
+      samePeriod(
+        { resetsAt: previousReset, usedPercent: previousUsed },
+        { resetsAt: nextReset, usedPercent: nextUsed },
+      ),
+    ).toBe(expected);
+  });
+});
+
+describe("foldLimitPeriods", () => {
+  const reset = Date.parse("2026-09-03T14:00:00.000Z");
+  const t = (minutes: number) => now + minutes * 60_000;
+
+  it("flattens a dip with the running max and splits a big drop under the same reset", () => {
+    const periods = foldLimitPeriods([
+      { at: t(0), usedPercent: 50, resetsAt: reset },
+      { at: t(5), usedPercent: 45, resetsAt: reset },
+      { at: t(10), usedPercent: 55, resetsAt: reset },
+      { at: t(15), usedPercent: 5, resetsAt: reset },
+    ]);
+    expect(periods).toEqual([
+      {
+        resetsAt: reset,
+        samples: [
+          { at: t(0), usedPercent: 50 },
+          { at: t(5), usedPercent: 50 },
+          { at: t(10), usedPercent: 55 },
+        ],
+      },
+      { resetsAt: reset, samples: [{ at: t(15), usedPercent: 5 }] },
+    ]);
+  });
+
+  it("orders readings from interleaved reporters by time and collapses equal instants", () => {
+    const periods = foldLimitPeriods([
+      { at: t(10), usedPercent: 30, resetsAt: reset },
+      { at: t(0), usedPercent: 10, resetsAt: reset },
+      { at: t(10), usedPercent: 28, resetsAt: reset },
+    ]);
+    expect(periods).toEqual([
+      {
+        resetsAt: reset,
+        samples: [
+          { at: t(0), usedPercent: 10 },
+          { at: t(10), usedPercent: 30 },
+        ],
+      },
+    ]);
+  });
+});
+
+describe("indexLimitHistory", () => {
+  const checkedAt = "2026-09-03T11:00:00.000Z";
+  const claude = ProviderDriverKind.make("claudeAgent");
+  const laptop = { entry: { target: { label: "Laptop" } } };
+  const envA = EnvironmentId.make("env-a");
+  const hubId = UsageLimitSourceId.make("hub");
+  const reset = Date.parse("2026-09-03T14:00:00.000Z");
+  const t = (minutes: number) => now + minutes * 60_000;
+  const series = (overrides: Partial<UsageLimitHistorySeries>): UsageLimitHistorySeries => ({
+    subject: { _tag: "instance", instanceId: ProviderInstanceId.make("claude") },
+    driver: claude,
+    windowId: "five_hour",
+    windowKind: "session",
+    periods: [{ resetsAtMs: reset, points: [[t(-60), 10]] }],
+    ...overrides,
+  });
+  const history = (...entries: UsageLimitHistorySeries[]): UsageLimitHistory => ({
+    series: entries,
+  });
+  const native = (overrides: Partial<ServerProvider>) =>
+    provider({
+      driver: claude,
+      instanceId: ProviderInstanceId.make("claude"),
+      usageLimits: { checkedAt, windows: [window] },
+      ...overrides,
+    });
+
+  it("joins native and hub readings of one email into one account's periods", () => {
+    const hubAccount = {
+      id: "claude.json",
+      driver: claude,
+      email: "same@example.com",
+      usageLimits: { checkedAt, windows: [window] },
+    };
+    const presentations = new Map([
+      [
+        envA,
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [native({ auth: { status: "authenticated", email: "Same@example.com" } })],
+            usageLimitSources: [
+              {
+                id: hubId,
+                kind: "cliproxy" as const,
+                label: "hub",
+                checkedAt,
+                accounts: [hubAccount],
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+    const index = indexLimitHistory(
+      presentations,
+      collectLimitAccounts(presentations),
+      new Map([
+        [
+          envA,
+          history(
+            series({
+              email: "same@example.com",
+              periods: [
+                {
+                  resetsAtMs: reset,
+                  points: [
+                    [t(-60), 10],
+                    [t(-20), 30],
+                  ],
+                },
+              ],
+            }),
+            series({
+              subject: { _tag: "source", sourceId: hubId, accountId: "claude.json" },
+              email: "same@example.com",
+              periods: [{ resetsAtMs: reset, points: [[t(-40), 20]] }],
+            }),
+          ),
+        ],
+      ]),
+    );
+    expect([...index.keys()]).toEqual(["claudeAgent:same@example.com"]);
+    expect(index.get("claudeAgent:same@example.com")?.get("session:five_hour")).toEqual([
+      {
+        resetsAt: reset,
+        samples: [
+          { at: t(-60), usedPercent: 10 },
+          { at: t(-40), usedPercent: 20 },
+          { at: t(-20), usedPercent: 30 },
+        ],
+      },
+    ]);
+  });
+
+  it("drops a series recorded under a previous sign-in on the same instance", () => {
+    const presentations = new Map([
+      [
+        envA,
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [native({ auth: { status: "authenticated", email: "new@example.com" } })],
+          },
+        },
+      ],
+    ]);
+    const index = indexLimitHistory(
+      presentations,
+      collectLimitAccounts(presentations),
+      new Map([[envA, history(series({ email: "old@example.com" }))]]),
+    );
+    expect(index.size).toBe(0);
+  });
+
+  it("joins a hub series without a workspace to the only live workspace, and drops it when two are live", () => {
+    const login = (instanceId: string, workspaceId: string) =>
+      native({
+        instanceId: ProviderInstanceId.make(instanceId),
+        auth: { status: "authenticated", email: "same@example.com", workspaceId },
+      });
+    const hubSeries = series({
+      subject: { _tag: "source", sourceId: hubId, accountId: "claude.json" },
+      email: "same@example.com",
+    });
+    const withLogins = (...logins: ServerProvider[]) => {
+      const presentations = new Map([[envA, { ...laptop, serverConfig: { providers: logins } }]]);
+      return indexLimitHistory(
+        presentations,
+        collectLimitAccounts(presentations),
+        new Map([[envA, history(hubSeries)]]),
+      );
+    };
+    expect([...withLogins(login("claude", "org-a")).keys()]).toEqual([
+      "claudeAgent:same@example.com:org-a",
+    ]);
+    expect(withLogins(login("claude", "org-a"), login("team", "org-b")).size).toBe(0);
+  });
+
+  it("joins an identity-less native account through its environment-scoped instance key", () => {
+    const presentations = new Map([
+      [envA, { ...laptop, serverConfig: { providers: [native({})] } }],
+    ]);
+    const index = indexLimitHistory(
+      presentations,
+      collectLimitAccounts(presentations),
+      new Map([[envA, history(series({}))]]),
+    );
+    expect([...index.keys()]).toEqual(["env-a:claude"]);
+  });
+
+  it("keeps one Codex weekly history whichever slot reported it", () => {
+    const codex = ProviderDriverKind.make("codex");
+    const presentations = new Map([
+      [
+        envA,
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [
+              provider({
+                usageLimits: {
+                  checkedAt,
+                  windows: [{ ...window, id: "secondary", kind: "weekly", label: "Weekly" }],
+                },
+              }),
+            ],
+          },
+        },
+      ],
+    ]);
+    const weekly = (windowId: string, at: number, usedPercent: number) =>
+      series({
+        subject: { _tag: "instance", instanceId: ProviderInstanceId.make("codex") },
+        driver: codex,
+        windowId,
+        windowKind: "weekly",
+        periods: [{ resetsAtMs: reset, points: [[at, usedPercent]] }],
+      });
+    const index = indexLimitHistory(
+      presentations,
+      collectLimitAccounts(presentations),
+      new Map([[envA, history(weekly("primary", t(-120), 20), weekly("secondary", t(-30), 40))]]),
+    );
+    expect([...(index.get("env-a:codex")?.keys() ?? [])]).toEqual(["weekly"]);
+    expect(index.get("env-a:codex")?.get("weekly")?.[0]?.samples).toEqual([
+      { at: t(-120), usedPercent: 20 },
+      { at: t(-30), usedPercent: 40 },
+    ]);
+  });
+});
+
+describe("limitAccountStatus", () => {
+  const checkedAt = "2026-09-03T11:00:00.000Z";
+  const account = (windows: LimitAccount["limits"]["windows"]): LimitAccount => ({
+    key: "a",
+    identity: "a",
+    reportedBy: [],
+    driver: ProviderDriverKind.make("claudeAgent"),
+    displayName: "A",
+    email: undefined,
+    plan: undefined,
+    accentColor: undefined,
+    environments: [],
+    sourceLabel: null,
+    redeem: null,
+    limits: { checkedAt, windows },
+  });
+  const weekly = {
+    ...window,
+    id: "seven_day",
+    kind: "weekly",
+    label: "Weekly",
+    resetsAt: "2026-09-06T12:00:00.000Z",
+  } as const;
+
+  it("reports the latest reset among spent windows as when quota is back", () => {
+    expect(
+      limitAccountStatus(
+        account([
+          { ...window, usedPercent: 100 },
+          { ...weekly, usedPercent: 100 },
+        ]),
+        now,
+      ),
+    ).toEqual({
+      exhausted: true,
+      backAt: Date.parse("2026-09-06T12:00:00.000Z"),
+    });
+  });
+
+  it("treats a spent window whose reset has passed as already restored", () => {
+    expect(
+      limitAccountStatus(
+        account([{ ...window, usedPercent: 100, resetsAt: "2026-09-03T11:59:00.000Z" }]),
+        now,
+      ),
+    ).toEqual({ exhausted: false });
+  });
+
+  it("cannot say when quota is back while a spent window has no clock", () => {
+    expect(
+      limitAccountStatus(
+        account([
+          { ...window, usedPercent: 100 },
+          { ...weekly, usedPercent: 100, resetsAt: undefined },
+        ]),
+        now,
+      ),
+    ).toMatchObject({ exhausted: true, backAt: null });
+  });
+
+  it("is not exhausted while every window has quota left", () => {
+    expect(limitAccountStatus(account([window]), now)).toEqual({ exhausted: false });
   });
 });

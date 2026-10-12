@@ -355,6 +355,10 @@
       "types": "./src/usageLimits.ts",
       "import": "./src/usageLimits.ts"
     },
+    "./usageLimitsForecast": {
+      "types": "./src/usageLimitsForecast.ts",
+      "import": "./src/usageLimitsForecast.ts"
+    },
     "./desktopAppControl": {
       "types": "./src/desktopAppControl.ts",
       "import": "./src/desktopAppControl.ts"
