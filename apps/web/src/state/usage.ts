@@ -171,6 +171,18 @@ function withoutProviders(
   );
 }
 
+/**
+ * Set during render, not in an effect, so the kept value shows in the same
+ * frame the next load starts pending. `keep` must return `current` unchanged
+ * when there is nothing new, or the render loops.
+ */
+function useKeptWhilePending<T>(initial: T, keep: (current: T) => T): T {
+  const [current, setCurrent] = useState(initial);
+  const next = keep(current);
+  if (next !== current) setCurrent(next);
+  return current;
+}
+
 export function useUsage(
   input: UsageSummaryInput,
   selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null = null,
@@ -240,29 +252,21 @@ export function useUsage(
   ).length;
   const isPending = answeredCount === 0 && stillReporting > 0;
 
-  // Stored during render, as React recommends for state that follows props, so
-  // the kept usage is on screen in the same frame the new window starts pending.
-  const [lastAnswered, setLastAnswered] = useState<
+  const lastAnswered = useKeptWhilePending<
     | (NonNullable<UsageView["shown"]> & {
         readonly selection: typeof selectedEnvironmentIds;
         readonly hidden: typeof hiddenProviders;
       })
     | null
-  >(null);
-  if (
+  >(null, (current) =>
     answeredCount > 0 &&
-    (lastAnswered?.merged !== merged ||
-      lastAnswered.window !== input ||
-      lastAnswered.selection !== selectedEnvironmentIds ||
-      lastAnswered.hidden !== hiddenProviders)
-  ) {
-    setLastAnswered({
-      window: input,
-      merged,
-      selection: selectedEnvironmentIds,
-      hidden: hiddenProviders,
-    });
-  }
+    (current?.merged !== merged ||
+      current.window !== input ||
+      current.selection !== selectedEnvironmentIds ||
+      current.hidden !== hiddenProviders)
+      ? { window: input, merged, selection: selectedEnvironmentIds, hidden: hiddenProviders }
+      : current,
+  );
   // Kept usage only stands in for the same environments and provider filter.
   const kept =
     lastAnswered?.selection === selectedEnvironmentIds && lastAnswered.hidden === hiddenProviders
@@ -314,19 +318,19 @@ export function useUsageLimitHistory(
   environmentIds: readonly EnvironmentId[],
   now: number,
 ): ReadonlyMap<EnvironmentId, UsageLimitHistory> {
-  const { sinceMs } = limitHistoryRequest(now);
   const key = JSON.stringify({
     environmentIds: [...environmentIds].toSorted(),
-    input: { sinceMs },
+    input: limitHistoryRequest(now),
   });
   const results = useAtomValue(usageLimitHistoryAtom(key));
-  const [kept, setKept] = useState(NO_LIMIT_HISTORY);
   const answered = results.flatMap(({ environmentId, history }) =>
     history === null ? [] : [[environmentId, history] as const],
   );
-  if (answered.some(([environmentId, history]) => kept.get(environmentId) !== history)) {
-    setKept(new Map([...kept, ...answered]));
-  }
+  const kept = useKeptWhilePending(NO_LIMIT_HISTORY, (current) =>
+    answered.some(([environmentId, history]) => current.get(environmentId) !== history)
+      ? new Map([...current, ...answered])
+      : current,
+  );
   return useMemo(
     () =>
       new Map(
