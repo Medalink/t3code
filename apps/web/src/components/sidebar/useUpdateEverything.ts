@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import { PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
+import {
+  AuthSettingsWriteScope,
+  PROVIDER_DISPLAY_NAMES,
+  sessionGrantsScope,
+} from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
@@ -10,9 +14,11 @@ import { useEnvironments } from "~/state/environments";
 import { useNpmReleasePublished } from "~/state/npmRelease";
 import { serverEnvironment } from "~/state/server";
 import { environmentSession } from "~/state/session";
+import { useAtomCommand } from "~/state/use-atom-command";
 import { useProviderUpdates } from "../ProviderUpdatesAction";
 import { canUpdateServer, useServerUpdate } from "../ServerUpdateAction";
 import {
+  collectRestartingMachines,
   collectServerUpdateTargets,
   describeUpdateEverything,
   runUpdateEverything,
@@ -22,8 +28,8 @@ import {
  * The remote half of the sidebar update button: outdated providers on every
  * connected machine, and servers behind the version this client runs or is
  * about to install (`localUpdateVersion`). Servers that install from npm appear
- * only once npm confirms that version. `run` performs the whole pass, including this app's
- * own download and install when given.
+ * only once npm confirms that version. `run` performs the whole pass, including
+ * this app's own download and install when given.
  */
 export function useUpdateEverything(localUpdateVersion: string | null) {
   const targetVersion = localUpdateVersion ?? APP_VERSION;
@@ -31,20 +37,25 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   const machinesAtom = useMemo(
     () =>
       Atom.make((get) =>
-        environments.map((environment) => ({
-          environmentId: environment.environmentId,
-          label: environment.label,
-          serverConfig: environment.serverConfig,
-          connected: environment.connection.phase === "connected",
-          hostedByThisApp:
-            isElectron &&
-            (environment.entry.target._tag === "PrimaryConnectionTarget" ||
-              isDesktopLocalConnectionTarget(environment.entry.target)),
-          canMaintain: canUpdateServer(
-            get(environmentSession.sessionStateAtom(environment.environmentId)),
-          ),
-          updateState: get(serverEnvironment.updateStateAtom(environment.environmentId)),
-        })),
+        environments.map((environment) => {
+          const session = get(environmentSession.sessionStateAtom(environment.environmentId));
+          return {
+            environmentId: environment.environmentId,
+            label: environment.label,
+            serverConfig: environment.serverConfig,
+            connected: environment.connection.phase === "connected",
+            hostedByThisApp:
+              isElectron &&
+              (environment.entry.target._tag === "PrimaryConnectionTarget" ||
+                isDesktopLocalConnectionTarget(environment.entry.target)),
+            canMaintain: canUpdateServer(session),
+            canWriteSettings:
+              session._tag === "Success" &&
+              session.value.authenticated &&
+              sessionGrantsScope(session.value, AuthSettingsWriteScope),
+            updateState: get(serverEnvironment.updateStateAtom(environment.environmentId)),
+          };
+        }),
       ),
     [environments],
   );
@@ -57,8 +68,10 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   const servers = published
     ? behindServers
     : behindServers.filter((server) => server.selfUpdate === "desktop-managed");
+  const restarts = collectRestartingMachines(machines, servers, localUpdateVersion !== null);
   const providers = useProviderUpdates();
   const updateServer = useServerUpdate();
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings);
 
   const { summary, lines } = describeUpdateEverything({
     localVersion: localUpdateVersion,
@@ -78,13 +91,47 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
     summary,
     /** One line per machine, for the confirmation. */
     lines,
-    run: (local: { downloadLocal?: () => Promise<boolean>; installLocal?: () => Promise<void> }) =>
-      runUpdateEverything({
-        ...local,
+    /** The servers this run restarts, which stops their running threads. */
+    restarts,
+    /** `continueThreads` sets "Continue threads after restarts" on every
+        restarting server before anything restarts. */
+    run: (local: {
+      downloadLocal?: () => Promise<boolean>;
+      installLocal?: () => Promise<void>;
+      continueThreads?: boolean;
+    }) => {
+      const { continueThreads, ...localSteps } = local;
+      return runUpdateEverything({
+        ...localSteps,
+        prepare: async () => {
+          if (continueThreads === undefined) return;
+          await Promise.all(
+            restarts
+              .filter(
+                (machine) =>
+                  machine.continueSupported && machine.continueEnabled !== continueThreads,
+              )
+              .map((machine) =>
+                updateSettings({
+                  environmentId: machine.environmentId,
+                  input: { patch: { continueThreadsAfterServerUpdate: continueThreads } },
+                }),
+              ),
+          );
+        },
         updateProviders: providers.updateAll,
         updateServers: async () => {
-          await Promise.all(servers.map((server) => updateServer(server)));
+          await Promise.all(
+            servers.map((server) =>
+              updateServer(
+                continueThreads === undefined
+                  ? server
+                  : { ...server, continueThreadsAfterServerUpdate: continueThreads },
+              ),
+            ),
+          );
         },
-      }),
+      });
+    },
   };
 }

@@ -2,6 +2,7 @@ import { EnvironmentId, type ServerSelfUpdateCapability } from "@t3tools/contrac
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  collectRestartingMachines,
   collectServerUpdateTargets,
   describeUpdateEverything,
   runUpdateEverything,
@@ -34,6 +35,7 @@ function machine(
     connected: true,
     hostedByThisApp: false,
     canMaintain: true,
+    canWriteSettings: true,
     updateState: { status: "idle" },
     ...overrides,
   };
@@ -62,11 +64,59 @@ describe("collectServerUpdateTargets", () => {
   });
 });
 
+describe("collectRestartingMachines", () => {
+  it("lists updated servers, and this app's servers only when it installs", () => {
+    const withContinuation = (
+      id: string,
+      overrides: Partial<UpdateEverythingMachine> = {},
+      enabled = false,
+    ) => {
+      const base = machine(id, "0.0.40", "boot-service", overrides);
+      return {
+        ...base,
+        serverConfig: {
+          environment: {
+            ...base.serverConfig!.environment,
+            capabilities: {
+              ...base.serverConfig!.environment.capabilities,
+              threadRestartContinuation: true,
+            },
+          },
+          settings: { continueThreadsAfterServerUpdate: enabled },
+        },
+      };
+    };
+    const machines = [
+      withContinuation("this-app", { hostedByThisApp: true }, true),
+      withContinuation("alvin"),
+      withContinuation("read-only", { canWriteSettings: false }),
+      machine("old", "0.0.40", "boot-service"),
+      withContinuation("providers-only"),
+    ];
+    const servers = ["alvin", "read-only", "old"].map((id) => ({
+      environmentId: EnvironmentId.make(id),
+    }));
+
+    expect(collectRestartingMachines(machines, servers, true)).toEqual([
+      { environmentId: "this-app", continueSupported: true, continueEnabled: true },
+      { environmentId: "alvin", continueSupported: true, continueEnabled: false },
+      { environmentId: "read-only", continueSupported: false, continueEnabled: false },
+      { environmentId: "old", continueSupported: false, continueEnabled: false },
+    ]);
+    expect(
+      collectRestartingMachines(machines, servers, false).map((entry) => entry.environmentId),
+    ).toEqual(["alvin", "read-only", "old"]);
+  });
+});
+
 describe("runUpdateEverything", () => {
   it("restarts servers after providers finish and installs this app last", async () => {
     const calls: string[] = [];
     let finishProviders = () => {};
     const run = runUpdateEverything({
+      prepare: async () => {
+        calls.push("prepare");
+      },
       downloadLocal: async () => {
         calls.push("download");
         return true;
@@ -84,11 +134,11 @@ describe("runUpdateEverything", () => {
       },
     });
 
-    await Promise.resolve();
-    expect(calls).toEqual(["download", "providers"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual(["prepare", "download", "providers"]);
     finishProviders();
     await run;
-    expect(calls).toEqual(["download", "providers", "servers", "install"]);
+    expect(calls).toEqual(["prepare", "download", "providers", "servers", "install"]);
   });
 
   it("still updates remote machines when the local download fails", async () => {

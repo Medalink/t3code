@@ -32,6 +32,7 @@ import {
   shouldShowDesktopUpdateCheckIcon,
 } from "./DesktopUpdateStatusIcon";
 import { SidebarUpdateReleaseNotes } from "./SidebarUpdateReleaseNotes";
+import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
 import { useUpdateEverything } from "./useUpdateEverything";
 
 type SidebarUpdatePopoverChangeDetails = Parameters<
@@ -198,6 +199,7 @@ function SidebarUpdateControl() {
   const state = useDesktopUpdateState();
   const [isActionPending, setIsActionPending] = useState(false);
   const [isUpdatingEverything, setIsUpdatingEverything] = useState(false);
+  const [isConfirmingEverything, setIsConfirmingEverything] = useState(false);
   const [checkAnimationKey, setCheckAnimationKey] = useState(0);
   const [isCheckAnimationLatched, setIsCheckAnimationLatched] = useState(false);
   const [releaseNotesPopoverHandle] = useState(() => PopoverCreateHandle());
@@ -275,38 +277,7 @@ function SidebarUpdateControl() {
     if (isInteractionDisabled) return;
 
     if (runsEverything) {
-      setIsActionPending(true);
-      try {
-        const confirmed = await ensureLocalApi().dialogs.confirm(
-          [
-            `${everything.summary}?`,
-            ...everything.lines,
-            "",
-            "Running tasks on these machines may be interrupted.",
-          ].join("\n"),
-        );
-        if (!confirmed) return;
-        setIsUpdatingEverything(true);
-        await everything.run({
-          ...(bridge && action === "download"
-            ? { downloadLocal: () => downloadLocalUpdate(bridge, { notifyDownloaded: false }) }
-            : {}),
-          ...(bridge && action !== "none"
-            ? { installLocal: () => installLocalUpdate(bridge) }
-            : {}),
-        });
-      } catch (error) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not update everything",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          }),
-        );
-      } finally {
-        setIsUpdatingEverything(false);
-        setIsActionPending(false);
-      }
+      setIsConfirmingEverything(true);
       return;
     }
 
@@ -372,7 +343,39 @@ function SidebarUpdateControl() {
         );
       })
       .finally(() => setIsActionPending(false));
-  }, [action, everything, isInteractionDisabled, prefersReducedMotion, runsEverything, state]);
+  }, [action, isInteractionDisabled, prefersReducedMotion, runsEverything, state]);
+
+  const runEverything = useCallback(
+    async (continueThreads: boolean | undefined) => {
+      const bridge = window.desktopBridge;
+      setIsConfirmingEverything(false);
+      setIsActionPending(true);
+      setIsUpdatingEverything(true);
+      try {
+        await everything.run({
+          ...(continueThreads === undefined ? {} : { continueThreads }),
+          ...(bridge && action === "download"
+            ? { downloadLocal: () => downloadLocalUpdate(bridge, { notifyDownloaded: false }) }
+            : {}),
+          ...(bridge && action !== "none"
+            ? { installLocal: () => installLocalUpdate(bridge) }
+            : {}),
+        });
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not update everything",
+            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          }),
+        );
+      } finally {
+        setIsUpdatingEverything(false);
+        setIsActionPending(false);
+      }
+    },
+    [action, everything],
+  );
 
   const handleCheckAnimationIteration = useCallback(() => {
     setIsCheckAnimationLatched(
@@ -503,6 +506,14 @@ function SidebarUpdateControl() {
           </PopoverPopup>
         ) : null}
       </Popover>
+      <UpdateEverythingDialog
+        open={isConfirmingEverything}
+        onOpenChange={setIsConfirmingEverything}
+        summary={everything.summary}
+        lines={everything.lines}
+        restarts={everything.restarts}
+        onConfirm={(continueThreads) => void runEverything(continueThreads)}
+      />
     </SidebarMenuItem>
   );
 }
