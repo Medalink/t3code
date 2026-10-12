@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildPeriodColumns, chartScale, niceScale } from "./UsageProviderChart";
+import { buildPeriodColumns, chartScale } from "./UsageProviderChart";
+import { niceScale } from "./usageChartScale";
 import { providersWithUsage } from "./usageProviders";
 
 describe("chartScale", () => {
