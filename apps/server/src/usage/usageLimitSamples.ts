@@ -116,7 +116,7 @@ export function observeSources(
 }
 
 export const KEEPALIVE_MS = 60 * 60_000;
-export const MIN_USED_DELTA = 0.5;
+const MIN_USED_DELTA = 0.5;
 
 /**
  * Whether a reading carries news the last stored row lacks. A failed probe
