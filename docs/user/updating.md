@@ -21,7 +21,7 @@ a manual update are not included. Use the notice or **Settings → Connections**
 for those.
 
 The confirmation counts the running threads that the restarts will interrupt,
-and how many will continue afterwards. See **Continue threads after restarts**
+and how many can resume afterwards. See **Continue threads after restarts**
 below.
 
 ## Before you update

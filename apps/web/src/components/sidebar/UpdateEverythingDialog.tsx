@@ -47,8 +47,9 @@ interface UpdateEverythingDialogProps {
 
 /**
  * Confirms an "update everything" run. It counts the running threads that the
- * restarts stop, and how many of them continue afterwards ("Continue threads
- * after restarts" is on for their server).
+ * restarts stop, and how many can resume afterwards because "Continue threads
+ * after restarts" is on for their server. Recovery still skips some, such as a
+ * thread waiting on the user, so the text says "can resume", not "will".
  */
 export function UpdateEverythingDialog({
   open,
@@ -100,10 +101,10 @@ function UpdateEverythingDialogContent({
         {running > 0 ? (
           <p className="pt-2 text-sm">
             {stopped === 0
-              ? `${threads} will continue after the restart.`
+              ? `${threads} will be interrupted and can resume after the restart.`
               : continuing === 0
                 ? `${threads} will be interrupted.`
-                : `${threads} will be interrupted. ${continuing} will continue after the restart.`}
+                : `${threads} will be interrupted. ${continuing} can resume after the restart.`}
           </p>
         ) : null}
       </AlertDialogHeader>
