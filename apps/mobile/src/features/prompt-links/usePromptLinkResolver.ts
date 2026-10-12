@@ -75,7 +75,12 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
   const waitingForShells =
     catalogState.isLoadingConnections ||
     catalogState.hasPendingShellSnapshot ||
-    catalogState.hasConnectingEnvironment;
+    // A machine still connecting may hold the repository or thread. One that keeps failing to
+    // reconnect has settled offline, and must not hold every link.
+    catalogState.connectingEnvironments.some(
+      (environment) =>
+        environment.connectionState === "connecting" || environment.connectionError === null,
+    );
 
   // Writes the prompt and the requested model into a draft. Returns true when the link named a
   // model the user cannot use, so their default stands in.
