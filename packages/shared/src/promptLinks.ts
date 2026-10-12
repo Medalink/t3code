@@ -62,7 +62,9 @@ const HIDDEN_CHARACTERS =
 // emoji presentation selector. Numeric ranges, because Hermes lacks Unicode property escapes.
 const isEmojiPart = (codePoint: number | undefined) =>
   codePoint !== undefined &&
-  (codePoint >= 0x1f000 || (codePoint >= 0x2190 && codePoint <= 0x2bff) || codePoint === 0xfe0f);
+  ((codePoint >= 0x1f000 && codePoint <= 0x1faff) ||
+    (codePoint >= 0x2190 && codePoint <= 0x2bff) ||
+    codePoint === 0xfe0f);
 
 /** Removes characters a reader cannot see, and counts them. */
 export function sanitizeLinkedPrompt(raw: string): LinkedPrompt {

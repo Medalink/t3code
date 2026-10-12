@@ -15,6 +15,7 @@ import {
   type PromptLinkRepository,
   promptLinkPullRequestUrl,
 } from "@t3tools/shared/promptLinks";
+import { useAtomValue } from "@effect/atom-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
 
@@ -23,14 +24,9 @@ import { isElectron } from "~/env";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { newProjectId } from "~/lib/utils";
-import {
-  useAllEnvironmentProjectSnapshotsReady,
-  useAllEnvironmentShellsBootstrapped,
-  useProjects,
-  useThreadShells,
-  waitForProject,
-} from "~/state/entities";
+import { useProjects, useThreadShells, waitForProject } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import { allReachableShellsLiveAtom } from "~/state/shell";
 import { sourceControlEnvironment } from "~/state/sourceControl";
 import { useAtomCommand } from "~/state/use-atom-command";
 
@@ -65,12 +61,9 @@ const openedLinkKeys = new Set<string>();
 export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
   const locationKey = useLocation({ select: (location) => location.state.__TSR_key ?? "" });
   const navigate = useNavigate();
-  // The link needs projects to find its repository. Every machine's live projects are best;
-  // with one offline, the projects already in from the others are enough.
-  const shellsReady = useAllEnvironmentShellsBootstrapped();
-  const projectsReady = useAllEnvironmentProjectSnapshotsReady();
+  // The link needs every reachable machine's projects and threads to find its repository.
+  const ready = useAtomValue(allReachableShellsLiveAtom);
   const projects = useProjects();
-  const ready = projectsReady || (shellsReady && projects.length > 0);
   const threads = useThreadShells();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -145,7 +138,9 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
   /** "No project" on the machine the user last worked on. */
   const openWithoutProject = async () => {
     setState({ status: "opening" });
-    const environmentId = scratchEnvironmentId(lastActiveEnvironmentId());
+    // The machine the user last worked on, or the only one that offers it.
+    const environmentId =
+      scratchEnvironmentId(lastActiveEnvironmentId()) ?? scratchEnvironmentId(null);
     // Reports its own failure.
     const project = environmentId === null ? null : await openScratchProject(environmentId);
     if (project === null) {

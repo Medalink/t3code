@@ -28,7 +28,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import {
   createNewTaskDraft,
-  getComposerDraftSnapshot,
   setComposerDraftText,
   updateComposerDraftSettings,
   waitForComposerDraftsLoaded,
@@ -75,9 +74,7 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
   const waitingForShells =
     catalogState.isLoadingConnections ||
     catalogState.hasPendingShellSnapshot ||
-    (!catalogState.hasLoadedShellSnapshot &&
-      catalogState.hasConnectingEnvironment &&
-      catalogState.connectionError === null);
+    (catalogState.hasConnectingEnvironment && catalogState.connectionError === null);
 
   // Writes the prompt and the requested model into a draft. Returns true when the link named a
   // model the user cannot use, so their default stands in.
@@ -147,7 +144,10 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
 
   const openScratchDraft = async (request: LinkedDraftRequest) => {
     const environmentId = promptLinkScratchEnvironmentId(
-      flow.projectScopes.flatMap((scope) => scope.projects.map((project) => project.environmentId)),
+      // Machines by their latest thread, scratch threads included.
+      [...threads]
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .map((thread) => thread.environmentId),
       connectedEnvironments
         .filter(
           (environment) =>
@@ -181,23 +181,17 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
     await openProjectDraft(result.value, { ...request, pullRequest: null });
   };
 
-  // Clone needs a tap on the destination screen. The prompt waits in the picker's own draft,
-  // which follows the user to the cloned project the way typed text does.
-  const cloneRepository = async (repository: PromptLinkRepository, request: LinkedDraftRequest) => {
+  // Clone needs a tap on the destination screen, which then opens a draft in the cloned project
+  // holding the prompt. A pull request's prompt belongs on its branch, which only exists once the
+  // clone is done, so that link has to be opened again.
+  const cloneRepository = (repository: PromptLinkRepository, request: LinkedDraftRequest) => {
     const environmentId =
       flow.selectedEnvironmentId ?? connectedEnvironments[0]?.environmentId ?? null;
     if (environmentId === null) {
       Alert.alert("Could not clone", "Connect an environment first.");
       return;
     }
-    await waitForComposerDraftsLoaded();
-    const draftKey = flow.draftKey;
-    // A pull request's prompt belongs on its branch, which the picker's draft cannot carry.
-    const carried =
-      request.pullRequest === null &&
-      draftKey !== null &&
-      getComposerDraftSnapshot(draftKey).text.trim().length === 0;
-    const modelUnavailable = carried ? writeDraft(draftKey, environmentId, request) : false;
+    const prompt = request.pullRequest === null ? request.prompt : null;
     const name = promptLinkRepositoryName(repository);
     navigation.dispatch(
       StackActions.push("AddProjectDestination", {
@@ -205,14 +199,15 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
         remoteUrl: `https://github.com/${name}.git`,
         repositoryTitle: name,
         repositoryName: repository.name,
+        ...(prompt ? { prompt: prompt.text } : {}),
       }),
     );
     if (!request.prompt) return;
     showPromptLinkNotice(
       [
-        promptLinkNotice({ hiddenCharacters: request.prompt.hiddenCharacters, modelUnavailable }),
-        carried
-          ? "The prompt opens in a new task after the clone starts."
+        promptLinkNotice({ hiddenCharacters: request.prompt.hiddenCharacters }),
+        prompt
+          ? "The prompt opens in a new task once the clone starts."
           : "Open the link again after the clone to get the prompt.",
       ].join("\n\n"),
     );
@@ -279,7 +274,7 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
       ...(request.prompt
         ? [{ text: "Use without project", onPress: () => void openScratchDraft(request) }]
         : []),
-      { text: "Clone", onPress: () => void cloneRepository(repository, request) },
+      { text: "Clone", onPress: () => cloneRepository(repository, request) },
     ]);
   });
 
