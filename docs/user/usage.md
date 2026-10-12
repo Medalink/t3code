@@ -95,6 +95,19 @@ the bar show each account's quota, countdown, and credits. Tap a row to open its
 The same account signed in on more than one environment, or reported by a hub as well, counts once.
 Filter with the environment dropdown to see what a single machine has.
 
+Above the window cards, each provider has a forecast. It adds up what is left across your accounts
+(three accounts make 300%), shows how fast you have been using it per hour, and charts remaining
+quota over time, projected forward as each account resets. Below the chart, **Next reset** says when quota comes back and how much.
+Pick how far ahead to look with the **Next** menu, and switch to **Drain rate** to see usage per
+hour instead. History is recorded while T3 Code is checking limits, so a new install or a gap
+overnight starts from the pace since the last reset. When there is not enough data yet, open
+**Forecast settings** and enter how much of the pool you use per hour. The same panel controls
+whether the forecast assumes you move to another account when one runs dry, which is on by
+default.
+
+Below the cards, one row per account shows its windows, when it last reported, and when an
+exhausted account is back. Use **Refresh quota** on a row to re-check just that account.
+
 Opening Limits checks the selected connected environments automatically. Each client waits at
 least five minutes between automatic checks of an environment, including after a failed check.
 If a window still looks stale, refresh Limits to re-check every provider and hub.

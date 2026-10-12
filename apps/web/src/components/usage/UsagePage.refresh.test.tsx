@@ -54,10 +54,14 @@ vi.mock("../../state/usage", () => ({
     isPartial: false,
     refresh: async () => undefined,
   }),
+  useUsageLimitHistory: () => new Map(),
 }));
 vi.mock("./usagePagePreferences", () => ({
   readUsagePagePreferences: () => ({ metric: state.metric, windowDays: 30 }),
   saveUsagePagePreferences: vi.fn(),
+}));
+vi.mock("./limitsForecastPreferences", () => ({
+  useLimitsForecastPreferences: () => [{ drainOverrides: {} }, vi.fn()],
 }));
 vi.mock("../ui/button", () => ({ Button: "button", InlineButton: "button" }));
 vi.mock("../ui/scroll-area", () => ({ ScrollArea: "div" }));

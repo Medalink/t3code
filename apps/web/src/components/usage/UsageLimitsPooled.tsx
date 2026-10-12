@@ -7,18 +7,20 @@ import {
   cursorUsageWindowDetails,
   displayLimitWindows,
   formatResetsIn,
+  indexLimitHistory,
   type LimitAccount,
+  type LimitHistoryIndex,
   type LimitPool,
   type LimitPoolMember,
   type LimitPoolWindow,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { AlertTriangleIcon, ExternalLinkIcon, TicketIcon } from "lucide-react";
-import { Fragment, type ReactNode, useState } from "react";
+import type { EnvironmentId, UsageLimitHistory } from "@t3tools/contracts";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 
 import { ensureLocalApi } from "../../localApi";
 import { usePrimarySettings } from "../../hooks/useSettings";
-import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { providerClients } from "../settings/providerDriverMeta";
@@ -34,94 +36,9 @@ import {
   resetCreditsSummary,
   useResetCredit,
 } from "./UsageLimits";
-
-/** `someone@example.com` → `SE`: enough to tell accounts apart, too little to identify one. */
-function accountInitials(email: string): string {
-  const [local = "", domain = ""] = email.split("@");
-  return `${local[0] ?? ""}${domain[0] ?? ""}`.toUpperCase() || "?";
-}
-
-/** A stable hue per email, so the same account gets the same chip on every visit. */
-function accountHue(email: string): number {
-  let hash = 0;
-  for (let index = 0; index < email.length; index += 1) {
-    hash = (hash * 31 + email.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash) % 360;
-}
-
-/** The two-letter chip for an email, coloured by a stable hue per address. */
-function AccountChip({ email }: { readonly email: string }) {
-  const hue = accountHue(email);
-  return (
-    <span
-      role="img"
-      aria-label={`Account ${accountInitials(email)}`}
-      className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-3xs leading-none font-semibold"
-      style={{ backgroundColor: `oklch(0.85 0.08 ${hue})`, color: `oklch(0.35 0.1 ${hue})` }}
-    >
-      {accountInitials(email)}
-    </span>
-  );
-}
-
-/**
- * The same mark the model picker uses for a native instance (provider glyph,
- * initials badge, accent); hub accounts have no instance, so they get the chip.
- */
-function AccountAvatar({
-  account,
-  className,
-}: {
-  readonly account: LimitAccount;
-  readonly className?: string;
-}) {
-  if (account.redeem) {
-    return (
-      <ProviderInstanceIcon
-        driverKind={account.driver}
-        displayName={
-          account.displayName ??
-          providerClients.get(account.driver)?.label ??
-          String(account.driver)
-        }
-        accentColor={account.accentColor}
-        showBadge={Boolean(account.displayName)}
-        indicatorBackground="var(--popover)"
-        className={cn("size-5", className)}
-        iconClassName="size-4 text-foreground/80"
-      />
-    );
-  }
-  return account.email ? <AccountChip email={account.email} /> : null;
-}
-
-/**
- * Who an account is, without printing the email: the instance name when there
- * is one, else a two-letter chip. The address itself is revealed on demand in
- * the segment's popover.
- */
-function AccountName({
-  account,
-  className,
-}: {
-  readonly account: LimitAccount;
-  readonly className?: string;
-}) {
-  if (account.displayName) return <span className={className}>{account.displayName}</span>;
-  if (account.email) {
-    return (
-      <span className={cn("inline-flex min-w-0 items-center", className)}>
-        <AccountChip email={account.email} />
-      </span>
-    );
-  }
-  return (
-    <span className={className}>
-      {providerClients.get(account.driver)?.label ?? String(account.driver)}
-    </span>
-  );
-}
+import { AccountAvatar, AccountName, accountInitials } from "./UsageLimitsAccount";
+import { PoolForecast } from "./UsageLimitsForecast";
+import { LimitLedger } from "./UsageLimitsLedger";
 
 function Row({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
@@ -531,7 +448,15 @@ function PoolWindowCard({
   );
 }
 
-function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+function PoolSection({
+  pool,
+  history,
+  now,
+}: {
+  readonly pool: LimitPool;
+  readonly history: LimitHistoryIndex;
+  readonly now: number;
+}) {
   const color = barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
   const windows = displayLimitWindows(pool);
@@ -547,6 +472,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
         />
         {label}
       </h2>
+      <PoolForecast pool={pool} history={history} now={now} color={color} />
       {windows.map((window) => {
         const details = pool.driver === "cursor" ? cursorUsageWindowDetails(window.id) : undefined;
         return (
@@ -560,6 +486,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
           />
         );
       })}
+      <LimitLedger pool={pool} now={now} />
     </section>
   );
 }
@@ -571,14 +498,23 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
  */
 export function UsageLimitsPooled({
   presentations,
+  history,
   now,
   cursorPrompt,
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
+  readonly history: ReadonlyMap<EnvironmentId, UsageLimitHistory>;
   readonly now: number;
   readonly cursorPrompt?: ReactNode;
 }) {
-  const pools = collectLimitPools(collectLimitAccounts(presentations), now);
+  const pools = useMemo(
+    () => collectLimitPools(collectLimitAccounts(presentations), now),
+    [presentations, now],
+  );
+  const historyIndex = useMemo(
+    () => indexLimitHistory(presentations, history),
+    [presentations, history],
+  );
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
   const cursorPromptAt =
@@ -596,7 +532,7 @@ export function UsageLimitsPooled({
       {pools.map((pool, index) => (
         <Fragment key={pool.driver}>
           {index === cursorPromptAt ? cursorPrompt : null}
-          <PoolSection pool={pool} now={now} />
+          <PoolSection pool={pool} history={historyIndex} now={now} />
         </Fragment>
       ))}
       {cursorPromptAt === pools.length ? cursorPrompt : null}

@@ -14,6 +14,8 @@ import {
   type UsageBucket,
   type UsageSummary,
   type UsageProviderKind,
+  type UsageLimitHistory,
+  type UsageLimitHistoryInput,
   type UsageSummaryInput,
 } from "@t3tools/contracts";
 import { needsCursorKeychainAccess, refreshUsage } from "@t3tools/client-runtime/state/usage";
@@ -22,6 +24,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo, useState } from "react";
 
+import { limitHistoryRequest } from "@t3tools/shared/usageLimitsForecast";
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@t3tools/shared/usageMerge";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentPresentations } from "./presentation";
@@ -280,4 +283,65 @@ export function useUsage(
     isPartial: answeredCount > 0 && stillReporting > 0,
     refresh,
   };
+}
+
+interface EnvironmentLimitHistory {
+  readonly environmentId: EnvironmentId;
+  readonly history: UsageLimitHistory | null;
+  readonly waiting: boolean;
+}
+
+const usageLimitHistoryAtom = Atom.family((key: string) =>
+  Atom.make((get): readonly EnvironmentLimitHistory[] => {
+    const { environmentIds, input } = JSON.parse(key) as {
+      readonly environmentIds: readonly EnvironmentId[];
+      readonly input: UsageLimitHistoryInput;
+    };
+    return environmentIds.map((environmentId) => {
+      const result = get(serverEnvironment.usageLimitHistory({ environmentId, input }));
+      return {
+        environmentId,
+        history: result._tag === "Success" ? result.value : null,
+        waiting: result.waiting,
+      };
+    });
+  }).pipe(Atom.withLabel(`web-usage:limit-history:${key}`)),
+);
+
+const NO_LIMIT_HISTORY: ReadonlyMap<EnvironmentId, UsageLimitHistory> = new Map();
+
+/**
+ * Every listed environment's recorded quota history. One that fails, or runs
+ * a server without history, is absent: the forecast falls back to pace. The
+ * request window moves with `now` a quarter hour at a time, and until the new
+ * window answers the previous answer stands in, so the chart does not blank.
+ */
+export function useUsageLimitHistory(
+  environmentIds: readonly EnvironmentId[],
+  now: number,
+): ReadonlyMap<EnvironmentId, UsageLimitHistory> {
+  const { sinceMs } = limitHistoryRequest(now);
+  const key = JSON.stringify({
+    environmentIds: [...environmentIds].toSorted(),
+    input: { sinceMs },
+  });
+  const results = useAtomValue(usageLimitHistoryAtom(key));
+  const [kept, setKept] = useState(NO_LIMIT_HISTORY);
+  // Stored during render, as in `useUsage`, so the stand-in never lags a frame.
+  const answered = results.flatMap(({ environmentId, history }) =>
+    history === null ? [] : [[environmentId, history] as const],
+  );
+  if (answered.some(([environmentId, history]) => kept.get(environmentId) !== history)) {
+    setKept(new Map([...kept, ...answered]));
+  }
+  return useMemo(
+    () =>
+      new Map(
+        results.flatMap(({ environmentId, history, waiting }) => {
+          const shown = history ?? (waiting ? kept.get(environmentId) : undefined);
+          return shown ? [[environmentId, shown] as const] : [];
+        }),
+      ),
+    [results, kept],
+  );
 }
