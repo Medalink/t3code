@@ -131,7 +131,11 @@ export function ComponentCatalogScreen() {
                 role="tab"
               />
               <View className="flex-row flex-wrap gap-2">
-                <Chip label="Selected filter" selected onPress={() => setEnabled(!enabled)} />
+                <Chip
+                  label="Selected filter"
+                  selected={enabled}
+                  onPress={() => setEnabled(!enabled)}
+                />
                 <Chip label="Label" size="small" />
                 <Chip label="Disabled" disabled onPress={announceAction} />
               </View>
