@@ -105,7 +105,7 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
         ...localSteps,
         prepare: async () => {
           if (continueThreads === undefined) return;
-          await Promise.all(
+          const results = await Promise.all(
             restarts
               .filter(
                 (machine) =>
@@ -118,6 +118,11 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
                 }),
               ),
           );
+          // A server that missed the setting would restart against the
+          // user's choice, so nothing restarts. The failed write toasts itself.
+          if (results.some((result) => result._tag === "Failure")) {
+            throw new Error("Nothing was updated because a thread setting could not be saved.");
+          }
         },
         updateProviders: providers.updateAll,
         updateServers: async () => {

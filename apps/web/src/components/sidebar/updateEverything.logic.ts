@@ -130,7 +130,8 @@ export interface UpdateEverythingSteps {
 }
 
 /**
- * Runs one "update everything" pass. `prepare` finishes first. Providers
+ * Runs one "update everything" pass. `prepare` finishes first, and when it
+ * throws nothing else runs. Providers
  * finish before any server restarts, so no install is cut off. The local download runs alongside the
  * remote work. This app installs last because its relaunch ends the run; a
  * failed download skips only that install. Steps report their own results.

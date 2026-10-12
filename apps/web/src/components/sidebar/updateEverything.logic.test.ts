@@ -141,6 +141,26 @@ describe("runUpdateEverything", () => {
     expect(calls).toEqual(["prepare", "download", "providers", "servers", "install"]);
   });
 
+  it("updates nothing when prepare fails", async () => {
+    const calls: string[] = [];
+    const step = (name: string) => async () => {
+      calls.push(name);
+      return true;
+    };
+    await expect(
+      runUpdateEverything({
+        prepare: async () => {
+          throw new Error("setting not saved");
+        },
+        downloadLocal: step("download"),
+        updateProviders: async () => void (await step("providers")()),
+        updateServers: async () => void (await step("servers")()),
+        installLocal: async () => void (await step("install")()),
+      }),
+    ).rejects.toThrow("setting not saved");
+    expect(calls).toEqual([]);
+  });
+
   it("still updates remote machines when the local download fails", async () => {
     const calls: string[] = [];
     await runUpdateEverything({
