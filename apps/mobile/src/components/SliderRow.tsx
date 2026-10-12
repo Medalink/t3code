@@ -184,7 +184,7 @@ export function SliderRow(props: {
               />
             </View>
             <Animated.View
-              className="absolute left-0 rounded-full border-border bg-primary-foreground"
+              className="absolute left-0 rounded-full border-border bg-primary"
               style={[
                 {
                   borderWidth: 1,
