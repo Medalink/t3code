@@ -130,15 +130,14 @@ export function toHistoryPeriods(
   options: {
     readonly sinceMs: number;
     readonly nowMs: number;
-    readonly requestedResolutionMs: number | undefined;
     readonly maxPoints: number;
   },
 ): UsageLimitHistoryPeriod[] {
   const { sinceMs, nowMs, maxPoints } = options;
-  const resolutionMs = Math.max(
-    options.requestedResolutionMs || 1,
-    Math.ceil(Math.max(1, nowMs - sinceMs) / (maxPoints - 2)),
-  );
+  const carryInBucket = 1;
+  const partialLastBucket = 1;
+  const wholeBuckets = maxPoints - carryInBucket - partialLastBucket;
+  const resolutionMs = Math.ceil(Math.max(1, nowMs - sinceMs) / wholeBuckets);
   const lastBucket = Math.floor(Math.max(0, nowMs - sinceMs) / resolutionMs);
   const bucketOf = (row: UsageLimitReading) =>
     row.sampledAt < sinceMs

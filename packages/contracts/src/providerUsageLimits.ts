@@ -177,17 +177,9 @@ export const UsageLimitsReport = Schema.Struct({
 });
 export type UsageLimitsReport = typeof UsageLimitsReport.Type;
 
-/** How long the server keeps quota samples. Clients use it to label how far back history can go. */
-export const USAGE_LIMIT_HISTORY_RETENTION_DAYS = 35;
-
 export const UsageLimitHistoryInput = Schema.Struct({
   /** Epoch ms. The server clamps it to the retention window. */
   sinceMs: Schema.Number,
-  /**
-   * Smallest spacing between returned points of one series. The server raises
-   * it so no series returns more than its point cap.
-   */
-  resolutionMs: Schema.optional(NonNegativeInt),
 });
 export type UsageLimitHistoryInput = typeof UsageLimitHistoryInput.Type;
 
@@ -223,8 +215,6 @@ export const UsageLimitHistorySeries = Schema.Struct({
 export type UsageLimitHistorySeries = typeof UsageLimitHistorySeries.Type;
 
 export const UsageLimitHistory = Schema.Struct({
-  readAtMs: Schema.Number,
-  retentionDays: NonNegativeInt,
   series: ForwardCompatibleArray(UsageLimitHistorySeries),
 });
 export type UsageLimitHistory = typeof UsageLimitHistory.Type;

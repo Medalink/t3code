@@ -182,7 +182,7 @@ describe("observeSources", () => {
 
 describe("toHistoryPeriods", () => {
   const sinceMs = now - 10 * HOUR;
-  const options = { sinceMs, nowMs: now, requestedResolutionMs: undefined, maxPoints: 600 };
+  const options = { sinceMs, nowMs: now, maxPoints: 600 };
 
   it("splits on a reset and keeps both sides of the edge", () => {
     const rows = [
@@ -213,7 +213,7 @@ describe("toHistoryPeriods", () => {
     const rows = Array.from({ length: 60 }, (_, index) =>
       reading({ sampledAt: sinceMs + index * 60_000, usedPercent: 10 + index * 0.5 }),
     );
-    const [period] = toHistoryPeriods(rows, { ...options, requestedResolutionMs: 15 * 60_000 });
+    const [period] = toHistoryPeriods(rows, { ...options, maxPoints: 42 });
     expect(period!.points.map(([at]) => (at - sinceMs) / 60_000)).toEqual([0, 14, 29, 44, 59]);
   });
 

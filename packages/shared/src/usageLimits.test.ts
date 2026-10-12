@@ -1594,8 +1594,6 @@ describe("indexLimitHistory", () => {
     ...overrides,
   });
   const history = (...entries: UsageLimitHistorySeries[]): UsageLimitHistory => ({
-    readAtMs: now,
-    retentionDays: 35,
     series: entries,
   });
   const native = (overrides: Partial<ServerProvider>) =>

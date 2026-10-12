@@ -12,7 +12,6 @@
 import {
   ProviderDriverKind,
   ServerProviderUsageWindow,
-  USAGE_LIMIT_HISTORY_RETENTION_DAYS,
   type UsageLimitHistory as UsageLimitHistoryResult,
   UsageLimitHistoryError,
   type UsageLimitHistoryInput,
@@ -53,7 +52,8 @@ export class UsageLimitHistory extends Context.Service<
   }
 >()("t3/usage/UsageLimitHistory") {}
 
-const RETENTION_MS = USAGE_LIMIT_HISTORY_RETENTION_DAYS * 24 * 60 * 60_000;
+const RETENTION_DAYS = 35;
+const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60_000;
 const MAX_POINTS_PER_SERIES = 600;
 
 const SampleRow = Schema.Struct({
@@ -221,22 +221,27 @@ const make = Effect.gen(function* () {
         else bySeries.set(row.seriesId, [row]);
       }
       return {
-        readAtMs: nowMs,
-        retentionDays: USAGE_LIMIT_HISTORY_RETENTION_DAYS,
         series: [...bySeries.values()].map((samples) => {
-          const { subject, driver, email, workspaceId, credentialFingerprint } = samples[0]!;
+          const {
+            subject,
+            driver,
+            email,
+            workspaceId,
+            credentialFingerprint,
+            windowId,
+            windowKind,
+          } = samples[0]!;
           return {
             subject,
             driver,
             ...(email ? { email } : {}),
             ...(workspaceId ? { workspaceId } : {}),
             ...(credentialFingerprint ? { credentialFingerprint } : {}),
-            windowId: samples[0]!.windowId,
-            windowKind: samples[0]!.windowKind,
+            windowId,
+            windowKind,
             periods: toHistoryPeriods(samples, {
               sinceMs,
               nowMs,
-              requestedResolutionMs: input.resolutionMs,
               maxPoints: MAX_POINTS_PER_SERIES,
             }),
           };

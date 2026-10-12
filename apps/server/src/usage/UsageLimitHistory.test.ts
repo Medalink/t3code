@@ -176,8 +176,6 @@ it.effect("read starts each series at its last reading before since and splits o
       ],
     ]);
     const history = yield* read({ sinceMs: since });
-    assert.strictEqual(history.readAtMs, now);
-    assert.strictEqual(history.retentionDays, 35);
     assert.deepEqual(history.series, [
       {
         subject: { _tag: "instance", instanceId: ProviderInstanceId.make("codex") },
