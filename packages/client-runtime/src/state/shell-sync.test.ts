@@ -570,6 +570,98 @@ describe("environment shell synchronization", () => {
     }),
   );
 
+  it.effect("resumes a new session from the cached cursor without an HTTP snapshot", () =>
+    Effect.gen(function* () {
+      const idleChild = {
+        ...v2ThreadShell,
+        id: ThreadId.make("thread-idle-child"),
+        lineage: {
+          rootThreadId: v2ThreadShell.id,
+          parentThreadId: v2ThreadShell.id,
+          relationshipToParent: "subagent" as const,
+        },
+      };
+      const liveChild = { ...idleChild, id: ThreadId.make("thread-live-child"), status: "running" };
+      const cachedSnapshot: OrchestrationV2ShellSnapshot = {
+        ...v2ShellSnapshot,
+        snapshotSequence: 7,
+        threads: [v2ThreadShell, idleChild, liveChild] as never,
+      };
+      const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
+      const subscribeInput = yield* Deferred.make<unknown>();
+      const httpLoads = yield* Ref.make(0);
+      const client = {
+        [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input: unknown) =>
+          Stream.unwrap(
+            Deferred.succeed(subscribeInput, input).pipe(Effect.as(Stream.fromQueue(events))),
+          ),
+      } as unknown as WsRpcProtocolClient;
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+        session: yield* SubscriptionRef.make(
+          Option.some({
+            ...session(client),
+            initialConfig: Effect.succeed({
+              shellResumeCompletionMarker: true,
+              shellThreadFamilies: true,
+            } as never),
+          }),
+        ),
+        prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeed(Option.some(cachedSnapshot)),
+        saveShell: () => Effect.void,
+        loadThread: () => Effect.succeed(Option.none()),
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        loadServerConfig: () => Effect.succeed(Option.none()),
+        saveServerConfig: () => Effect.void,
+        loadVcsRefs: () => Effect.succeed(Option.none()),
+        saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
+        clear: () => Effect.void,
+      });
+      const snapshotLoader = ShellSnapshotLoader.ShellSnapshotLoader.of({
+        load: () => Ref.update(httpLoads, (n) => n + 1).pipe(Effect.as(Option.none())),
+      });
+      const shellState = yield* makeEnvironmentShellState().pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+        Effect.provideService(ShellSnapshotLoader.ShellSnapshotLoader, snapshotLoader),
+      );
+
+      expect(yield* Deferred.await(subscribeInput)).toMatchObject({
+        afterSequence: 7,
+        omitIdleSubagents: true,
+        requestCompletionMarker: true,
+      });
+      expect(yield* Ref.get(httpLoads)).toBe(0);
+      const resuming = yield* SubscriptionRef.get(shellState);
+      expect(resuming.status).toBe("synchronizing");
+      expect(resuming.generation).toBe(0);
+      expect(Option.getOrThrow(resuming.snapshot).threads.map((thread) => thread.id)).toEqual([
+        v2ThreadShell.id,
+        liveChild.id,
+      ]);
+
+      yield* Queue.offer(events, { kind: "synchronized" });
+      const live = Option.getOrThrow(
+        yield* SubscriptionRef.changes(shellState).pipe(
+          Stream.filter((state) => state.status === "live"),
+          Stream.runHead,
+        ),
+      );
+      // Family reads wait for a non-zero generation, so a finished replay must start them.
+      expect(live.generation).toBeGreaterThan(0);
+    }),
+  );
+
   it.effect("fills deferred cached pull request links without overwriting newer rows", () =>
     Effect.gen(function* () {
       const link = (number: number): ThreadPullRequestLink => ({

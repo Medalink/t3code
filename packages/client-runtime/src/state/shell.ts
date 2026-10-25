@@ -1,4 +1,5 @@
 import {
+  isLiveSubagentShell,
   ORCHESTRATION_V2_WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
@@ -105,6 +106,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     status: shellStatusForSnapshot(cachedSnapshot),
   });
   const awaitingCompletion = yield* Ref.make(false);
+  const resumeAwaitingAuthority = yield* Ref.make(false);
   const lastAuthoritativeSession = yield* Ref.make<RpcSession | null>(null);
   const activeSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
   const latestLiveSnapshot = yield* Ref.make<Option.Option<OrchestrationV2ShellSnapshot>>(
@@ -198,18 +200,29 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   ) {
     const initial = yield* SubscriptionRef.get(state);
     let waiting = yield* Ref.get(awaitingCompletion);
+    let resuming = yield* Ref.get(resumeAwaitingAuthority);
     let next = initial;
     let receivedSnapshot = false;
+    let completedResume = false;
     for (const item of items) {
       if (item.kind === "synchronized") {
         waiting = false;
         if (Option.isSome(next.snapshot)) {
-          next = { ...next, status: "live", error: Option.none() };
+          // A finished replay is as current as a snapshot, so family reads start again.
+          next = {
+            ...next,
+            status: "live",
+            error: Option.none(),
+            ...(resuming ? { generation: ++lastShellGeneration } : {}),
+          };
+          completedResume ||= resuming;
         }
+        resuming = false;
         continue;
       }
       const authoritative =
         item.kind === "snapshot" && item.resolvedRepositoryIdentityRoots === undefined;
+      if (authoritative) resuming = false;
       const nextSnapshot =
         item.kind === "snapshot"
           ? mergeShellSnapshotProjects(
@@ -248,6 +261,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       };
     }
     yield* Ref.set(awaitingCompletion, waiting);
+    yield* Ref.set(resumeAwaitingAuthority, resuming);
     if (next === initial) return;
     if (pendingLinkIds !== undefined && Option.isSome(next.snapshot)) {
       pendingLinkRows = new Set(
@@ -258,7 +272,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       yield* Ref.set(latestLiveSnapshot, next.snapshot);
     }
     yield* SubscriptionRef.set(state, next);
-    if (receivedSnapshot) {
+    if (receivedSnapshot || completedResume) {
       const session = yield* Ref.get(activeSubscriptionSession);
       if (session !== null) {
         yield* Ref.set(lastAuthoritativeSession, session);
@@ -361,13 +375,27 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
         yield* setSynchronizing;
 
-        // Foreground resubscriptions on the same live session can resume from
-        // the in-memory cursor. A new session reloads the authoritative HTTP
-        // snapshot so a valid cursor cannot preserve incomplete cached data.
+        // A cursor resumes on any session once the server can say when replay is done and
+        // what to leave out. The server sends a full snapshot itself when the gap is too
+        // large, so the HTTP snapshot is only needed when there is nothing to resume from.
         const hasAuthoritativeSnapshot = (yield* Ref.get(lastAuthoritativeSession)) === session;
-        let canResume = hasAuthoritativeSnapshot;
+        const resumesCachedCursor =
+          !hasAuthoritativeSnapshot && supportsCompletionMarker && omitIdleSubagents;
+        if (resumesCachedCursor) {
+          yield* SubscriptionRef.update(state, (value) =>
+            Option.isNone(value.snapshot)
+              ? value
+              : {
+                  ...value,
+                  snapshot: Option.some(withoutIdleSubagentRows(value.snapshot.value)),
+                },
+          );
+        }
         let current = yield* SubscriptionRef.get(state);
-        if (!hasAuthoritativeSnapshot || Option.isNone(current.snapshot)) {
+        let canResume =
+          Option.isSome(current.snapshot) && (hasAuthoritativeSnapshot || resumesCachedCursor);
+        yield* Ref.set(resumeAwaitingAuthority, canResume && !hasAuthoritativeSnapshot);
+        if (!canResume) {
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
             Effect.flatMap(
               Option.match({
@@ -448,6 +476,25 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
 
   return state;
 });
+
+/** Mirrors the server's idle-child omission so a cache saved without it stops carrying those rows. */
+function withoutIdleSubagentRows(
+  snapshot: OrchestrationV2ShellSnapshot,
+): OrchestrationV2ShellSnapshot {
+  const parentIds = new Set<string>();
+  for (const thread of snapshot.threads) {
+    if (thread.lineage.relationshipToParent === "subagent" && thread.lineage.parentThreadId) {
+      parentIds.add(thread.lineage.parentThreadId);
+    }
+  }
+  const threads = snapshot.threads.filter(
+    (thread) =>
+      thread.lineage.relationshipToParent !== "subagent" ||
+      isLiveSubagentShell(thread) ||
+      parentIds.has(thread.id),
+  );
+  return threads.length === snapshot.threads.length ? snapshot : { ...snapshot, threads };
+}
 
 function shellStateChanges(environmentId: EnvironmentId) {
   return followStreamInEnvironment(
