@@ -283,6 +283,22 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     }
   }, snapshotWriteLock.withPermit);
 
+  const pruneIdleSubagentRows = Effect.gen(function* () {
+    const pruned = yield* SubscriptionRef.modify(
+      state,
+      (current): [Option.Option<OrchestrationV2ShellSnapshot>, EnvironmentShellState] => {
+        if (Option.isNone(current.snapshot)) return [Option.none(), current];
+        const snapshot = withoutIdleSubagentRows(current.snapshot.value);
+        return snapshot === current.snapshot.value
+          ? [Option.none(), current]
+          : [Option.some(snapshot), { ...current, snapshot: Option.some(snapshot) }];
+      },
+    );
+    if (Option.isNone(pruned)) return;
+    yield* Ref.set(latestLiveSnapshot, pruned);
+    yield* Queue.offer(persistence, pruned.value);
+  }).pipe(snapshotWriteLock.withPermit);
+
   const stateScope = yield* Effect.scope;
   // Each full snapshot supersedes the previous one's fill; links from an older snapshot must
   // not land on rows a newer snapshot reused.
@@ -382,14 +398,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         const resumesCachedCursor =
           !hasAuthoritativeSnapshot && supportsCompletionMarker && omitIdleSubagents;
         if (resumesCachedCursor) {
-          yield* SubscriptionRef.update(state, (value) =>
-            Option.isNone(value.snapshot)
-              ? value
-              : {
-                  ...value,
-                  snapshot: Option.some(withoutIdleSubagentRows(value.snapshot.value)),
-                },
-          );
+          yield* pruneIdleSubagentRows;
         }
         let current = yield* SubscriptionRef.get(state);
         let canResume =
