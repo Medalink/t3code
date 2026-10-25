@@ -93,7 +93,7 @@ describe("orchestration cache envelopes", () => {
       environmentId,
       snapshot: v2ShellSnapshot,
     });
-    expect(decodeStoredShellSnapshotSync(shell).schemaVersion).toBe(3);
+    expect(decodeStoredShellSnapshotSync(shell).schemaVersion).toBe(4);
   });
 
   it.effect("discards V1-versioned cache envelopes after a decode failure", () =>

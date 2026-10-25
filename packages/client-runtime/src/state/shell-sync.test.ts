@@ -644,8 +644,10 @@ describe("environment shell synchronization", () => {
       const resuming = yield* SubscriptionRef.get(shellState);
       expect(resuming.status).toBe("synchronizing");
       expect(resuming.generation).toBe(0);
+      // The server kept an idle child with a hidden child of its own; only the server can know that.
       expect(Option.getOrThrow(resuming.snapshot).threads.map((thread) => thread.id)).toEqual([
         v2ThreadShell.id,
+        idleChild.id,
         liveChild.id,
       ]);
 
@@ -658,6 +660,27 @@ describe("environment shell synchronization", () => {
       );
       // Family reads wait for a non-zero generation, so a finished replay must start them.
       expect(live.generation).toBeGreaterThan(0);
+
+      // A fallback snapshot keeps unchanged rows, so lists and the cache encoder skip them.
+      const cachedRows = Option.getOrThrow(live.snapshot).threads;
+      const changedChild = { ...liveChild, title: "Renamed" };
+      yield* Queue.offer(events, {
+        kind: "snapshot",
+        snapshot: {
+          ...cachedSnapshot,
+          snapshotSequence: 9000,
+          threads: [{ ...v2ThreadShell }, changedChild] as never,
+        },
+      });
+      const reset = Option.getOrThrow(
+        yield* SubscriptionRef.changes(shellState).pipe(
+          Stream.filter((state) => state.generation > live.generation),
+          Stream.runHead,
+        ),
+      );
+      const [kept, renamed] = Option.getOrThrow(reset.snapshot).threads;
+      expect(kept).toBe(cachedRows[0]);
+      expect(renamed?.title).toBe("Renamed");
     }),
   );
 

@@ -28,6 +28,7 @@ export function sameThreadPullRequests(
 export function reuseUnchangedThreadShells(
   previous: OrchestrationV2ShellSnapshot | null,
   next: OrchestrationV2ShellSnapshot,
+  { pullRequestsDeferred = true }: { readonly pullRequestsDeferred?: boolean } = {},
 ): OrchestrationV2ShellSnapshot {
   if (previous === null || previous.threads.length === 0) return next;
   const previousById = new Map(previous.threads.map((thread) => [thread.id, thread] as const));
@@ -36,7 +37,7 @@ export function reuseUnchangedThreadShells(
     const prior = previousById.get(thread.id);
     if (prior === undefined) return thread;
     const candidate =
-      thread.pullRequests === undefined && prior.pullRequests !== undefined
+      pullRequestsDeferred && thread.pullRequests === undefined && prior.pullRequests !== undefined
         ? { ...thread, pullRequests: prior.pullRequests }
         : thread;
     const retained = sameThreadShell(prior, candidate) ? prior : candidate;

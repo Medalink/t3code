@@ -1,5 +1,4 @@
 import {
-  isLiveSubagentShell,
   ORCHESTRATION_V2_WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
@@ -227,7 +226,11 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         item.kind === "snapshot"
           ? mergeShellSnapshotProjects(
               Option.getOrNull(next.snapshot),
-              item.snapshot,
+              authoritative
+                ? reuseUnchangedThreadShells(Option.getOrNull(next.snapshot), item.snapshot, {
+                    pullRequestsDeferred: false,
+                  })
+                : item.snapshot,
               item.resolvedRepositoryIdentityRoots === undefined
                 ? undefined
                 : {
@@ -282,22 +285,6 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       yield* Queue.offer(persistence, next.snapshot.value);
     }
   }, snapshotWriteLock.withPermit);
-
-  const pruneIdleSubagentRows = Effect.gen(function* () {
-    const pruned = yield* SubscriptionRef.modify(
-      state,
-      (current): [Option.Option<OrchestrationV2ShellSnapshot>, EnvironmentShellState] => {
-        if (Option.isNone(current.snapshot)) return [Option.none(), current];
-        const snapshot = withoutIdleSubagentRows(current.snapshot.value);
-        return snapshot === current.snapshot.value
-          ? [Option.none(), current]
-          : [Option.some(snapshot), { ...current, snapshot: Option.some(snapshot) }];
-      },
-    );
-    if (Option.isNone(pruned)) return;
-    yield* Ref.set(latestLiveSnapshot, pruned);
-    yield* Queue.offer(persistence, pruned.value);
-  }).pipe(snapshotWriteLock.withPermit);
 
   const stateScope = yield* Effect.scope;
   // Each full snapshot supersedes the previous one's fill; links from an older snapshot must
@@ -397,13 +384,12 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         const hasAuthoritativeSnapshot = (yield* Ref.get(lastAuthoritativeSession)) === session;
         const resumesCachedCursor =
           !hasAuthoritativeSnapshot && supportsCompletionMarker && omitIdleSubagents;
-        if (resumesCachedCursor) {
-          yield* pruneIdleSubagentRows;
-        }
         let current = yield* SubscriptionRef.get(state);
         let canResume =
           Option.isSome(current.snapshot) && (hasAuthoritativeSnapshot || resumesCachedCursor);
-        yield* Ref.set(resumeAwaitingAuthority, canResume && !hasAuthoritativeSnapshot);
+        yield* Ref.set(resumeAwaitingAuthority, canResume && !hasAuthoritativeSnapshot).pipe(
+          snapshotWriteLock.withPermit,
+        );
         if (!canResume) {
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
             Effect.flatMap(
@@ -485,25 +471,6 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
 
   return state;
 });
-
-/** Mirrors the server's idle-child omission so a cache saved without it stops carrying those rows. */
-function withoutIdleSubagentRows(
-  snapshot: OrchestrationV2ShellSnapshot,
-): OrchestrationV2ShellSnapshot {
-  const parentIds = new Set<string>();
-  for (const thread of snapshot.threads) {
-    if (thread.lineage.relationshipToParent === "subagent" && thread.lineage.parentThreadId) {
-      parentIds.add(thread.lineage.parentThreadId);
-    }
-  }
-  const threads = snapshot.threads.filter(
-    (thread) =>
-      thread.lineage.relationshipToParent !== "subagent" ||
-      isLiveSubagentShell(thread) ||
-      parentIds.has(thread.id),
-  );
-  return threads.length === snapshot.threads.length ? snapshot : { ...snapshot, threads };
-}
 
 function shellStateChanges(environmentId: EnvironmentId) {
   return followStreamInEnvironment(
