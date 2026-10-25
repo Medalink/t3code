@@ -330,6 +330,8 @@ export const withLateEditorConfig = <E, R>(
         editorConfig.shellRevealInFileManagerKind !== config.shellRevealInFileManagerKind,
     ),
     Stream.map((editorConfig) => ({ type: "editorsResolved" as const, editorConfig })),
+    // The snapshot was already served, so a failed background scan must not end the subscription.
+    Stream.ignoreCause({ log: "Warn" }),
   );
 
   return Stream.merge(liveUpdates, lateEditorConfig).pipe(
