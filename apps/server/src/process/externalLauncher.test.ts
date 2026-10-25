@@ -13,6 +13,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -690,6 +691,134 @@ it.effect("keeps scanning after the caller is interrupted and shares that scan",
       ),
     ),
   );
+});
+
+const EDITOR_CACHE_TTL_PLUS_ONE = "61 seconds";
+
+let editorScanHarnessCount = 0;
+
+const makeEditorScanHarness = () => {
+  const searchPath = `C:\\t3-editor-scan-harness-${editorScanHarnessCount++}`;
+  const scan = {
+    vscodePresent: true,
+    crash: false,
+    parked: undefined as
+      | { started: Deferred.Deferred<void>; release: Deferred.Deferred<void> }
+      | undefined,
+  };
+  const layer = ExternalLauncher.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        FileSystem.layerNoop({
+          stat: () =>
+            Effect.gen(function* () {
+              if (scan.parked) {
+                yield* Deferred.succeed(scan.parked.started, undefined);
+                yield* Deferred.await(scan.parked.release);
+              }
+              if (scan.crash) return yield* Effect.die("scan crashed");
+              if (!scan.vscodePresent) {
+                return yield* PlatformError.systemError({
+                  _tag: "NotFound",
+                  module: "FileSystem",
+                  method: "stat",
+                });
+              }
+              return { type: "File" } as FileSystem.File.Info;
+            }),
+        }),
+        Path.layer,
+        Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() => Effect.sync(() => makeMockDetachedHandle())),
+        ),
+      ),
+    ),
+  );
+  const park = () => {
+    const parked = { started: Deferred.makeUnsafe<void>(), release: Deferred.makeUnsafe<void>() };
+    scan.parked = parked;
+    return parked;
+  };
+  const provide = Effect.provide(
+    Layer.mergeAll(
+      layer,
+      Layer.succeed(HostProcess.Platform, "win32"),
+      ConfigProvider.layer(
+        ConfigProvider.fromEnv({
+          env: {
+            PATH: searchPath,
+            PATHEXT: ".COM;.EXE;.BAT;.CMD",
+          },
+        }),
+      ),
+    ),
+  );
+  return { scan, park, provide };
+};
+
+it.effect(
+  "serves the previous editor list while an expired scan refreshes in the background",
+  () => {
+    const harness = makeEditorScanHarness();
+    return Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      const first = yield* launcher.resolveAvailableEditors();
+      assert.include(first, "vscode");
+
+      harness.scan.vscodePresent = false;
+      const refresh = harness.park();
+      yield* TestClock.adjust(EDITOR_CACHE_TTL_PLUS_ONE);
+
+      assert.deepEqual(yield* launcher.resolveAvailableEditors(), first);
+      yield* Deferred.await(refresh.started);
+      assert.deepEqual(yield* launcher.resolveAvailableEditors(), first);
+
+      yield* Deferred.succeed(refresh.release, undefined);
+      const refreshed = yield* launcher.resolveFreshAvailableEditors();
+      assert.notInclude(refreshed, "vscode");
+      assert.deepEqual(yield* launcher.resolveAvailableEditors(), refreshed);
+    }).pipe(harness.provide);
+  },
+);
+
+it.effect("keeps the previous editor list when the background refresh fails", () => {
+  const harness = makeEditorScanHarness();
+  return Effect.gen(function* () {
+    const launcher = yield* ExternalLauncher.ExternalLauncher;
+    const first = yield* launcher.resolveAvailableEditors();
+
+    harness.scan.crash = true;
+    const refresh = harness.park();
+    yield* TestClock.adjust(EDITOR_CACHE_TTL_PLUS_ONE);
+    assert.deepEqual(yield* launcher.resolveAvailableEditors(), first);
+    yield* Deferred.succeed(refresh.release, undefined);
+    assert.equal(Exit.isFailure(yield* Effect.exit(launcher.resolveFreshAvailableEditors())), true);
+
+    harness.scan.crash = false;
+    harness.scan.parked = undefined;
+    assert.deepEqual(yield* launcher.resolveAvailableEditors(), first);
+    assert.deepEqual(yield* launcher.resolveFreshAvailableEditors(), first);
+  }).pipe(harness.provide);
+});
+
+it.effect("still waits for the first editor scan", () => {
+  const harness = makeEditorScanHarness();
+  const firstScan = harness.park();
+  return Effect.gen(function* () {
+    const launcher = yield* ExternalLauncher.ExternalLauncher;
+    const returned = Deferred.makeUnsafe<void>();
+    const caller = yield* Effect.forkChild(
+      launcher
+        .resolveAvailableEditors()
+        .pipe(Effect.tap(() => Deferred.succeed(returned, undefined))),
+    );
+    yield* Deferred.await(firstScan.started);
+    assert.equal(Deferred.isDoneUnsafe(returned), false);
+
+    yield* Deferred.succeed(firstScan.release, undefined);
+    assert.include(yield* Fiber.join(caller), "vscode");
+  }).pipe(harness.provide);
 });
 
 const launchWindowsShimEditor = (cwd: string) =>

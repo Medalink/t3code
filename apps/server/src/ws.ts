@@ -288,7 +288,7 @@ const resolveFileManagerRevealKindForConfig = <E, R>(
 
 type EditorDiscovery = Pick<
   ExternalLauncher.ExternalLauncher["Service"],
-  "resolveAvailableEditors" | "resolveFileManagerRevealKind"
+  "resolveFreshAvailableEditors" | "resolveFileManagerRevealKind"
 >;
 
 const resolveEditorConfig = Effect.fn("ws.resolveEditorConfig")(function* <E, R>(
@@ -314,7 +314,7 @@ export const withLateEditorConfig = <E, R>(
   liveUpdates: Stream.Stream<ServerConfigStreamEvent, E, R>,
   launcher: EditorDiscovery,
 ) => {
-  const lateEditorConfig = Stream.fromEffect(launcher.resolveAvailableEditors()).pipe(
+  const lateEditorConfig = Stream.fromEffect(launcher.resolveFreshAvailableEditors()).pipe(
     Stream.filter(
       (editors) =>
         editors.join() !== config.availableEditors.join() ||
@@ -1729,9 +1729,22 @@ export const layerWsRpc = (
         const auth = yield* serverAuth.getDescriptor();
         const scratchWorkspaceRoot = yield* managedFolders.scratchRoot;
         const lastEventLoopStall = yield* eventLoopMonitor.latestNoticeableStall;
-        const editorConfig = yield* resolveEditorConfig(
-          yield* resolveAvailableEditorsForConfig(externalLauncher.resolveAvailableEditors()),
-          resolveFileManagerRevealKindForConfig(externalLauncher.resolveFileManagerRevealKind()),
+        const [editorConfig, remoteOpenTargetList, directEndpointList] = yield* Effect.all(
+          [
+            resolveAvailableEditorsForConfig(externalLauncher.resolveAvailableEditors()).pipe(
+              Effect.flatMap((availableEditors) =>
+                resolveEditorConfig(
+                  availableEditors,
+                  resolveFileManagerRevealKindForConfig(
+                    externalLauncher.resolveFileManagerRevealKind(),
+                  ),
+                ),
+              ),
+            ),
+            resolveAvailableEditorsForConfig(remoteOpenTargets.resolveTargets()),
+            resolveAvailableEditorsForConfig(directEndpoints.resolve()),
+          ],
+          { concurrency: "unbounded" },
         );
 
         return {
@@ -1743,10 +1756,8 @@ export const layerWsRpc = (
           issues: keybindingsConfig.issues,
           providers,
           ...editorConfig,
-          remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
-            remoteOpenTargets.resolveTargets(),
-          ),
-          directEndpoints: yield* resolveAvailableEditorsForConfig(directEndpoints.resolve()),
+          remoteOpenTargets: remoteOpenTargetList,
+          directEndpoints: directEndpointList,
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
