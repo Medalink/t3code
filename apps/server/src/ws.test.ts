@@ -132,7 +132,7 @@ it.effect("resends late editors without rolling back updates already sent", () =
       snapshotConfig({ settings: { enableProviderUpdateChecks: true } as never }),
       Stream.make(settingsUpdated({ enableProviderUpdateChecks: false })),
       {
-        resolveAvailableEditors: () => Effect.succeed(["file-manager"]),
+        resolveFreshAvailableEditors: () => Effect.succeed(["file-manager"]),
         resolveFileManagerRevealKind: () =>
           Deferred.await(settingsSent).pipe(Effect.as("file-explorer" as const)),
       },
@@ -155,13 +155,33 @@ it.effect("resends late editors without rolling back updates already sent", () =
   }),
 );
 
+it.effect("pushes a refreshed editor list that differs from the stale snapshot", () =>
+  Effect.gen(function* () {
+    const events = yield* withLateEditorConfig(
+      snapshotConfig({ availableEditors: ["vscode"] }),
+      Stream.empty,
+      {
+        resolveFreshAvailableEditors: () => Effect.succeed(["vscode", "zed"]),
+        resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+      },
+    ).pipe(Stream.runCollect);
+
+    const [late] = Array.from(events);
+    assert.equal(events.length, 1);
+    assert.equal(late?.type, "snapshot");
+    if (late?.type === "snapshot") {
+      assert.deepEqual(late.config.availableEditors, ["vscode", "zed"]);
+    }
+  }),
+);
+
 it.effect("resends a file manager reveal kind that missed the snapshot", () =>
   Effect.gen(function* () {
     const events = yield* withLateEditorConfig(
       snapshotConfig({ availableEditors: ["file-manager"] }),
       Stream.empty,
       {
-        resolveAvailableEditors: () => Effect.succeed(["file-manager"]),
+        resolveFreshAvailableEditors: () => Effect.succeed(["file-manager"]),
         resolveFileManagerRevealKind: () => Effect.succeed("file-explorer"),
       },
     ).pipe(Stream.runCollect);
@@ -461,6 +481,9 @@ it.effect(
       const initialKeybindings = (yield* keybindings.getSnapshot).keybindings;
       const discoveryStarted = yield* Deferred.make<void>();
       const finishDiscovery = yield* Deferred.make<void>();
+      const siblingDiscoveriesStarted = yield* Deferred.make<void>();
+      const remoteTarget = { kind: "tailscale", host: "box.ts.net" } as const;
+      const directEndpoint = { kind: "lan", httpBaseUrl: "http://192.168.1.2:3773" } as const;
       const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
       const configRpcServices = Layer.mergeAll(
         layerUnusedConfigRpcServices,
@@ -470,6 +493,7 @@ it.effect(
               Effect.andThen(Deferred.await(finishDiscovery)),
               Effect.as([]),
             ),
+          resolveFreshAvailableEditors: () => Effect.succeed([]),
           resolveFileManagerRevealKind: () => Effect.succeed(undefined),
         }),
         Layer.mock(ProviderRegistry.ProviderRegistry)({
@@ -478,9 +502,12 @@ it.effect(
         }),
         Layer.mock(UsageLimitSources.UsageLimitSources)({ streamChanges: Stream.make([]) }),
         Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
-          resolveTargets: () => Effect.succeed([]),
+          resolveTargets: () =>
+            Deferred.succeed(siblingDiscoveriesStarted, undefined).pipe(Effect.as([remoteTarget])),
         }),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
+        Layer.mock(DirectEndpoints.DirectEndpoints)({
+          resolve: () => Effect.succeed([directEndpoint]),
+        }),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
           scratchRoot: Effect.succeedNone,
           namedProjectsRoot: process.cwd(),
@@ -553,6 +580,8 @@ it.effect(
         headers: Headers.empty,
       });
       yield* Deferred.await(discoveryStarted);
+      // Sibling discoveries must run while the editor scan is still parked.
+      yield* Deferred.await(siblingDiscoveriesStarted);
 
       const duringDiscovery = yield* settings.updateSettings({ defaultAutoPull: true });
       yield* Deferred.succeed(finishDiscovery, undefined);
@@ -560,6 +589,8 @@ it.effect(
       assert.equal(snapshot.type, "snapshot");
       if (snapshot.type !== "snapshot") return yield* Effect.die("Missing initial snapshot");
       assert.isFalse(snapshot.config.settings.defaultAutoPull);
+      assert.deepEqual(snapshot.config.remoteOpenTargets, [remoteTarget]);
+      assert.deepEqual(snapshot.config.directEndpoints, [directEndpoint]);
       assert.deepEqual(snapshot.config.keybindings, initialKeybindings);
       const duringAck = yield* keybindings.upsertKeybindingRule({
         key: "mod+alt+y",

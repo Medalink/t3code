@@ -458,7 +458,10 @@ interface EditorDiscoveryCacheEntry {
 export class ExternalLauncher extends Context.Service<
   ExternalLauncher,
   {
+    /** Serves the last known list once one exists, refreshing an expired scan in the background. */
     readonly resolveAvailableEditors: () => Effect.Effect<ReadonlyArray<EditorId>>;
+    /** Waits for a current scan, so callers holding a stale list can learn what the refresh found. */
+    readonly resolveFreshAvailableEditors: () => Effect.Effect<ReadonlyArray<EditorId>>;
     /** Requires file-manager in resolveAvailableEditors; Linux relies on its directory-handler probe. */
     readonly resolveFileManagerRevealKind: () => Effect.Effect<FileManagerRevealKind | undefined>;
     readonly launchBrowser: (target: string) => Effect.Effect<void, ExternalLauncherError>;
@@ -770,6 +773,7 @@ export const make = Effect.gen(function* () {
   const editorDiscoveryCache = yield* Ref.make<Option.Option<EditorDiscoveryCacheEntry>>(
     Option.none(),
   );
+  const lastKnownEditors = yield* Ref.make<Option.Option<ReadonlyArray<EditorId>>>(Option.none());
   const runEditorDiscovery = (scan: Deferred.Deferred<ReadonlyArray<EditorId>>) =>
     provideCommandResolutionServices(resolveAvailableEditors()).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -784,6 +788,9 @@ export const make = Effect.gen(function* () {
                 ? Option.some({ scan, expiresAtNanos })
                 : Option.none(),
           );
+          if (Exit.isSuccess(exit)) {
+            yield* Ref.set(lastKnownEditors, Option.some(exit.value));
+          }
           yield* Deferred.done(scan, exit);
         }),
       ),
@@ -816,10 +823,18 @@ export const make = Effect.gen(function* () {
     }
     return scan;
   }).pipe(Effect.uninterruptible);
-  const cachedAvailableEditors = Effect.flatMap(acquireEditorDiscovery, Deferred.await);
+  const freshAvailableEditors = Effect.flatMap(acquireEditorDiscovery, Deferred.await);
+  const staleAvailableEditors = Effect.gen(function* () {
+    const lastKnown = yield* Ref.get(lastKnownEditors);
+    const scan = yield* acquireEditorDiscovery;
+    return Option.isSome(lastKnown) && !Deferred.isDoneUnsafe(scan)
+      ? lastKnown.value
+      : yield* Deferred.await(scan);
+  });
 
   return ExternalLauncher.of({
-    resolveAvailableEditors: () => cachedAvailableEditors,
+    resolveAvailableEditors: () => staleAvailableEditors,
+    resolveFreshAvailableEditors: () => freshAvailableEditors,
     resolveFileManagerRevealKind: () =>
       provideCommandResolutionServices(resolveFileManagerRevealKind()).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
