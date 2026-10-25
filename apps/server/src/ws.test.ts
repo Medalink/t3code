@@ -100,6 +100,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as EventStore from "./orchestration-v2/EventStore.ts";
 import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
+import { omitIdleSubagentShells } from "./orchestration-v2/ShellStream.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
@@ -320,15 +321,18 @@ it.effect("shell snapshots leave idle subagent children out only for clients tha
           item?.kind === "snapshot" ? item.snapshot.threads.map((thread) => thread.id) : [],
         ),
         Effect.provideService(ThreadManagement.ThreadManagementService, {
-          readShellSnapshot: () =>
+          readShellSnapshot: (options?: { readonly omitIdleSubagents?: boolean }) =>
             Effect.succeed(
               Effect.succeed({
                 schemaVersion: 1,
                 snapshotSequence: 0,
-                threads,
+                threads:
+                  options?.omitIdleSubagents === true ? omitIdleSubagentShells(threads) : threads,
                 archivedThreads: [],
               }),
             ),
+          listActiveSubagentThreadIds: () =>
+            Effect.succeed([ThreadId.make("idle"), ThreadId.make("live")]),
         } as unknown as ThreadManagement.ThreadManagementService["Service"]),
         Effect.provideService(ProjectStore.ProjectStoreV2, {
           listShells: () => Effect.succeed([]),

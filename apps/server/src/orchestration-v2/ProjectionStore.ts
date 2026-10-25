@@ -1,5 +1,6 @@
-import { pendingGuestMessageCount } from "@t3tools/contracts";
+import { isLiveSubagentShell, pendingGuestMessageCount } from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
+import { omitIdleSubagentShells } from "./ShellStream.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -415,7 +416,15 @@ export interface ShellSnapshotOptions {
    */
   readonly subagentFamilyOf?: ThreadId;
   readonly worktreePath?: string;
+  /**
+   * With `location: "active"`, returns what `omitIdleSubagentShells` leaves of the active rows,
+   * without reading or decoding the rows it drops. Ignored for other locations.
+   */
+  readonly omitIdleSubagents?: boolean;
 }
+
+const omitsIdleSubagents = (options: ShellSnapshotOptions | undefined) =>
+  options?.omitIdleSubagents === true && options.location === "active";
 
 export interface ProjectionStoreV2Shape {
   readonly searchThreadStream: (
@@ -1114,6 +1123,9 @@ type ShellThreadRow = {
   readonly latest_user_message_at: string | null;
   readonly latest_user_authored_message_at: string | null;
   readonly has_actionable_proposed_plan: number;
+  readonly relationship_to_parent: string | null;
+  readonly parent_thread_id: string | null;
+  readonly has_pull_requests: number;
 };
 
 type ShellRunRow = {
@@ -5873,7 +5885,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE plan.thread_id = t.thread_id
                   AND plan.kind = 'proposed_plan'
                   AND plan.status = 'active'
-              ) AS has_actionable_proposed_plan
+              ) AS has_actionable_proposed_plan,
+              json_extract(t.payload_json, '$.lineage.relationshipToParent') AS relationship_to_parent,
+              json_extract(t.payload_json, '$.lineage.parentThreadId') AS parent_thread_id,
+              coalesce(json_array_length(t.payload_json, '$.pullRequests'), 0) > 0 AS has_pull_requests
             FROM orchestration_v2_projection_threads t
             LEFT JOIN orchestration_v2_projection_runs active ON active.run_id = (
               SELECT r.run_id
@@ -6420,10 +6435,80 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const shellSnapshotReadError = (cause: unknown) =>
       new ProjectionStoreReadError({ threadId: ThreadId.make("thread:shell"), cause });
 
+    // A superset of the threads whose shell can list background work, found without decoding.
+    const threadIdsMayHoldBackgroundWork = Effect.fn(
+      "ProjectionStore.threadIdsMayHoldBackgroundWork",
+    )(function* (threadIds: ReadonlyArray<ThreadId>) {
+      if (threadIds.length === 0) return new Set<string>();
+      const [providerThreadRows, pendingTurnItemRows] = yield* Effect.all([
+        sql<{ readonly thread_id: string }>`
+          SELECT DISTINCT thread_id
+          FROM orchestration_v2_projection_provider_threads
+          WHERE thread_id IN ${sql.in(threadIds)}
+            AND json_array_length(payload_json, '$.pendingBackgroundTasks') > 0
+        `,
+        selectShellPendingTurnItemRows(threadIds),
+      ]);
+      return new Set([...providerThreadRows, ...pendingTurnItemRows].map((row) => row.thread_id));
+    });
+
+    /**
+     * Applies `omitIdleSubagentShells` to the selected rows before any dependent read. Columns the
+     * row read already returns settle most children, and a narrow probe rules out background work.
+     * A child they cannot settle stays in `recheckIds`: it is decoded with the kept rows and
+     * dropped afterwards unless `isLiveSubagentShell` holds for its shell.
+     */
+    const dropIdleSubagentRows = Effect.fn("ProjectionStore.dropIdleSubagentRows")(function* (
+      rows: ReadonlyArray<ShellThreadRow>,
+    ) {
+      const parentIds = new Set<string>();
+      for (const row of rows) {
+        if (row.relationship_to_parent === "subagent" && row.parent_thread_id) {
+          parentIds.add(row.parent_thread_id);
+        }
+      }
+      const unsettled = rows.filter(
+        (row) =>
+          row.relationship_to_parent === "subagent" &&
+          !parentIds.has(row.thread_id) &&
+          row.activity_run_status === null &&
+          row.pending_request_payload_json === null,
+      );
+      const mayHoldBackgroundWork = yield* threadIdsMayHoldBackgroundWork(
+        unsettled.map((row) => ThreadId.make(row.thread_id)),
+      );
+      const recheckIds = new Set(
+        unsettled
+          .filter(
+            (row) =>
+              // The blocking-failure override can still turn a live stored status into "failed".
+              isLiveSubagentShell({
+                activityRunStatus: null,
+                status: shellStatusFromStoredRunStatus(row.latest_run_status),
+                pendingRuntimeRequest: null,
+                pendingBackgroundTasks: [],
+              }) ||
+              row.has_pull_requests !== 0 ||
+              mayHoldBackgroundWork.has(row.thread_id),
+          )
+          .map((row) => row.thread_id),
+      );
+      const idleIds = new Set(
+        unsettled.filter((row) => !recheckIds.has(row.thread_id)).map((row) => row.thread_id),
+      );
+      return { rows: rows.filter((row) => !idleIds.has(row.thread_id)), recheckIds };
+    });
+
     const readShellSnapshotRows = Effect.fn("ProjectionStore.readShellSnapshotRows")(function* (
       options: ShellSnapshotOptions | undefined,
     ) {
-      const targetThreadRows = yield* selectShellThreadRows(undefined, options);
+      const selectedRows = yield* selectShellThreadRows(undefined, options);
+      const { rows: targetThreadRows, recheckIds } = omitsIdleSubagents(options)
+        ? yield* dropIdleSubagentRows(selectedRows)
+        : { rows: selectedRows, recheckIds: new Set<string>() };
+      const selectedRowsByThreadId = new Map(
+        selectedRows.map((row) => [ThreadId.make(row.thread_id), row] as const),
+      );
       const targetThreadIds = new Set(targetThreadRows.map((row) => ThreadId.make(row.thread_id)));
       const rowsByThreadId = new Map(
         targetThreadRows.map((row) => [ThreadId.make(row.thread_id), row] as const),
@@ -6436,7 +6521,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       while (pendingSourceIds.length > 0) {
         const sourceId = pendingSourceIds.pop();
         if (sourceId === undefined || rowsByThreadId.has(sourceId)) continue;
-        const source = (yield* selectShellThreadRows(sourceId))[0];
+        const source =
+          selectedRowsByThreadId.get(sourceId) ?? (yield* selectShellThreadRows(sourceId))[0];
         if (source === undefined) continue;
         rowsByThreadId.set(sourceId, source);
         if (source.forked_from_run_source_thread_id !== null) {
@@ -6481,6 +6567,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       ]);
       return {
         targetThreadIds,
+        recheckIds,
         threadRows,
         runRows,
         itemCountRows,
@@ -6493,6 +6580,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
     const decodeShellSnapshot = Effect.fn("ProjectionStore.decodeShellSnapshot")(function* ({
       targetThreadIds,
+      recheckIds,
       threadRows,
       runRows,
       itemCountRows,
@@ -6530,7 +6618,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               statesByThreadId,
             }),
           }),
-        );
+        )
+        .filter((shell) => !recheckIds.has(shell.id) || isLiveSubagentShell(shell));
 
       return {
         schemaVersion: ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,
@@ -6788,10 +6877,11 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             service.getThreadProjection(threadId).pipe(Effect.map(threadShellFromProjection)),
         );
         const visible = shells.filter((thread) => thread.deletedAt === null);
+        const active = visible.filter((thread) => thread.archivedAt === null);
         return {
           schemaVersion: ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,
           snapshotSequence: yield* Ref.get(sequence),
-          threads: visible.filter((thread) => thread.archivedAt === null),
+          threads: omitsIdleSubagents(options) ? omitIdleSubagentShells(active) : active,
           archivedThreads: visible.filter((thread) => thread.archivedAt !== null),
         };
       }),

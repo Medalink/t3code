@@ -14,13 +14,15 @@ import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import {
-  activeShellRowsForSubscriber,
   bufferShellLiveStream,
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
+  loadShellSnapshotParts,
   omitIdleSubagentShells,
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemsFromInitialSnapshot,
@@ -191,17 +193,49 @@ describe("omitIdleSubagentShells", () => {
     ]);
   });
 
-  it("still filters the transcript events of omitted children for a subscriber that opts in", () => {
-    const threads = [row("root", null), row("idle", "root")];
-    const omitted = activeShellRowsForSubscriber(threads, true);
-    expect(omitted.threads.map((thread) => thread.id)).toEqual(["root"]);
-    expect(
-      shouldPublishShellApplicationEvent(
-        { event: { threadId: "idle", type: "turn-item.updated" } } as ApplicationStoredEvent,
-        omitted.subagentThreadIds,
-      ),
-    ).toBe(false);
-  });
+  it.effect(
+    "keeps the transcript filter on omitted children by listing them with the snapshot",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const threads = [row("root", null), row("idle", "root"), row("woken", "root")];
+        const load = (input: {
+          readonly rows: ReadonlyArray<OrchestrationV2ThreadShell>;
+          readonly listSubagentThreadIds?: Effect.Effect<ReadonlyArray<string>>;
+        }) =>
+          loadShellSnapshotParts({
+            sql,
+            readThreads: Effect.succeed(
+              Effect.succeed({
+                schemaVersion: 1,
+                snapshotSequence: 0,
+                threads: input.rows,
+                archivedThreads: [],
+              }),
+            ),
+            listProjects: Effect.succeed([]),
+            latestSequence: Effect.succeed(0),
+            ...(input.listSubagentThreadIds === undefined
+              ? {}
+              : { listSubagentThreadIds: input.listSubagentThreadIds }),
+          });
+
+        const whole = yield* load({ rows: threads });
+        expect([...whole.subagentThreadIds]).toEqual(["idle", "woken"]);
+
+        const omitted = yield* load({
+          rows: threads.slice(0, 1),
+          listSubagentThreadIds: Effect.succeed(["idle", "woken"]),
+        });
+        expect(omitted.threads.threads.map((thread) => thread.id)).toEqual(["root"]);
+        expect(
+          shouldPublishShellApplicationEvent(
+            { event: { threadId: "woken", type: "turn-item.updated" } } as ApplicationStoredEvent,
+            omitted.subagentThreadIds,
+          ),
+        ).toBe(false);
+      }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+  );
 });
 
 describe("shellStreamItemsFromInitialSnapshot", () => {

@@ -131,7 +131,6 @@ import {
   coalesceStoredThreadEvents,
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
-  activeShellRowsForSubscriber,
   loadShellSnapshotParts,
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemFromThreadShell,
@@ -1017,21 +1016,22 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       },
     );
     const loadSnapshot = Effect.fn("ws.orchestrationV2.loadShellSnapshot")(function* () {
-      const base = buildActiveShellSnapshot(
-        yield* loadShellSnapshotParts({
-          sql,
-          readThreads: threadManagement.readShellSnapshot({ location: "active" }),
-          listProjects: projects.listShells(),
-          latestSequence: applicationEvents.latestApplicationSequence,
-        }),
-      );
-      const rows = activeShellRowsForSubscriber(base.threads, input.omitIdleSubagents === true);
-      subagentThreadIds = rows.subagentThreadIds;
+      const omitIdleSubagents = input.omitIdleSubagents === true;
+      const parts = yield* loadShellSnapshotParts({
+        sql,
+        readThreads: threadManagement.readShellSnapshot({ location: "active", omitIdleSubagents }),
+        listProjects: projects.listShells(),
+        latestSequence: applicationEvents.latestApplicationSequence,
+        ...(omitIdleSubagents
+          ? { listSubagentThreadIds: threadManagement.listActiveSubagentThreadIds() }
+          : {}),
+      });
+      const base = buildActiveShellSnapshot(parts);
+      subagentThreadIds = parts.subagentThreadIds;
       const enriched = yield* enrichProjectShells(base.projects);
       return {
         snapshot: {
           ...base,
-          threads: rows.threads,
           projects: enriched.projects,
         } as OrchestrationV2ShellSnapshot,
         resolvedRepositoryIdentityRoots: enriched.resolvedRepositoryIdentityRoots,
