@@ -37,6 +37,7 @@ import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { omitIdleSubagentShells } from "./ShellStream.ts";
 import {
   buildBoundedThreadProjection,
   decodeThreadHistoryCursor,
@@ -1218,6 +1219,369 @@ it.effect("lists only active subagent IDs without loading shell data", () =>
       [...(yield* store.listActiveSubagentThreadIds())],
       [ThreadId.make("active-subagent")],
     );
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect.each([
+  ["memory", ProjectionStore.layerMemory],
+  ["SQL", layerTest],
+] as const)(
+  "%s shells leave out idle subagent children exactly as omitIdleSubagentShells does",
+  ([, layer]) =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const projectId = ProjectId.make("project:omit-idle");
+      const id = (name: string) => ThreadId.make(`thread:omit-idle:${name}`);
+      const runIdOf = (key: string) => RunId.make(`run:omit-idle:${key}`);
+      const nodeIdOf = (key: string) => NodeId.make(`node:omit-idle:${key}`);
+      const providerThreadIdOf = (name: string) =>
+        ProviderThreadId.make(`provider-thread:omit-idle:${name}`);
+      const watchedLink = {
+        host: "github.com",
+        repository: "pingdotgg/t3code",
+        number: 7,
+        url: "https://github.com/pingdotgg/t3code/pull/7",
+        source: "agent" as const,
+        linkedAt: DateTime.formatIso(now),
+        snapshot: null,
+        stack: null,
+      };
+      const createThread = (input: {
+        readonly name: string;
+        readonly parent?: string;
+        readonly forkedFromRun?: true;
+        readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink>;
+      }) =>
+        store.apply({
+          id: EventId.make(`event:omit-idle:${input.name}:thread`),
+          type: "thread.created",
+          threadId: id(input.name),
+          occurredAt: now,
+          payload: {
+            createdBy: "user",
+            creationSource: "web",
+            id: id(input.name),
+            projectId,
+            title: input.name,
+            providerInstanceId,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            ...(input.pullRequests === undefined ? {} : { pullRequests: input.pullRequests }),
+            activeProviderThreadId: null,
+            lineage:
+              input.parent === undefined
+                ? { parentThreadId: null, relationshipToParent: null, rootThreadId: id(input.name) }
+                : {
+                    parentThreadId: id(input.parent),
+                    relationshipToParent: input.forkedFromRun === true ? "fork" : "subagent",
+                    rootThreadId: id(input.forkedFromRun === true ? input.parent : "root"),
+                  },
+            forkedFrom:
+              input.parent !== undefined && input.forkedFromRun === true
+                ? { type: "run", threadId: id(input.parent), runId: runIdOf(input.parent) }
+                : null,
+            createdAt: now,
+            updatedAt: now,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+          },
+        });
+      const createRun = (input: {
+        readonly name: string;
+        readonly key?: string;
+        readonly ordinal?: number;
+        readonly status: "completed" | "failed" | "running" | "queued";
+      }) => {
+        const key = input.key ?? input.name;
+        return store.apply({
+          id: EventId.make(`event:omit-idle:${key}:run`),
+          type: "run.created",
+          threadId: id(input.name),
+          runId: runIdOf(key),
+          nodeId: nodeIdOf(key),
+          driver,
+          occurredAt: now,
+          payload: {
+            id: runIdOf(key),
+            threadId: id(input.name),
+            ordinal: input.ordinal ?? 1,
+            providerInstanceId,
+            modelSelection,
+            providerThreadId: null,
+            userMessageId: MessageId.make(`message:omit-idle:${key}`),
+            rootNodeId: nodeIdOf(key),
+            activeAttemptId: null,
+            status: input.status,
+            requestedAt: now,
+            startedAt: input.status === "queued" ? null : now,
+            completedAt: input.status === "completed" || input.status === "failed" ? now : null,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        });
+      };
+      const itemBase = (name: string, status: "completed" | "failed" | "running") => ({
+        id: TurnItemId.make(`turn-item:omit-idle:${name}`),
+        threadId: id(name),
+        runId: runIdOf(name),
+        nodeId: nodeIdOf(name),
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 1,
+        status,
+        title: name,
+        startedAt: now,
+        completedAt: status === "running" ? null : now,
+        updatedAt: now,
+      });
+      const applyItem = (name: string, payload: OrchestrationV2TurnItem) =>
+        store.apply({
+          id: EventId.make(`event:omit-idle:${name}:item`),
+          type: "turn-item.updated",
+          threadId: id(name),
+          runId: runIdOf(name),
+          nodeId: nodeIdOf(name),
+          driver,
+          occurredAt: now,
+          payload,
+        });
+      const providerThread = (name: string, ownerThreadName: string, holdsTask: boolean) =>
+        store.apply({
+          id: EventId.make(`event:omit-idle:${name}:provider-thread`),
+          type: "provider-thread.updated",
+          threadId: id(ownerThreadName),
+          driver,
+          providerInstanceId,
+          occurredAt: now,
+          payload: {
+            id: providerThreadIdOf(name),
+            driver,
+            providerInstanceId,
+            providerSessionId: null,
+            appThreadId: id(ownerThreadName),
+            ownerNodeId: null,
+            nativeThreadRef: null,
+            nativeConversationHeadRef: null,
+            status: "idle",
+            firstRunOrdinal: 1,
+            lastRunOrdinal: 1,
+            handoffIds: [],
+            forkedFrom: null,
+            pendingBackgroundTasks: holdsTask
+              ? [{ taskId: `task:${name}`, kind: "background_task" }]
+              : [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+      yield* createThread({ name: "root" });
+      yield* createThread({ name: "idle", parent: "root" });
+      yield* createRun({ name: "idle", status: "completed" });
+      yield* applyItem("idle", {
+        ...itemBase("idle", "completed"),
+        type: "assistant_message",
+        messageId: MessageId.make("message:omit-idle:idle:assistant"),
+        text: "Answer",
+        streaming: false,
+      });
+      yield* createThread({ name: "fork", parent: "idle", forkedFromRun: true });
+
+      yield* createThread({ name: "active", parent: "root" });
+      yield* createRun({ name: "active", status: "running" });
+      yield* createThread({ name: "asking", parent: "root" });
+      yield* createRun({ name: "asking", status: "completed" });
+      yield* store.apply({
+        id: EventId.make("event:omit-idle:asking:request"),
+        type: "runtime-request.updated",
+        threadId: id("asking"),
+        nodeId: nodeIdOf("asking"),
+        driver,
+        occurredAt: now,
+        payload: {
+          id: RuntimeRequestId.make("request:omit-idle:asking"),
+          nodeId: nodeIdOf("asking"),
+          providerTurnId: null,
+          nativeRequestRef: null,
+          kind: "user_input",
+          status: "pending",
+          responseCapability: { type: "message" },
+          createdAt: now,
+          resolvedAt: null,
+        },
+      });
+      yield* createThread({ name: "queued", parent: "root" });
+      yield* createRun({ name: "queued", status: "queued" });
+      yield* createThread({ name: "provider-task", parent: "root" });
+      yield* createRun({ name: "provider-task", status: "completed" });
+      yield* providerThread("provider-task", "provider-task", true);
+      yield* createThread({ name: "pending-item", parent: "root" });
+      yield* createRun({ name: "pending-item", status: "completed" });
+      yield* applyItem("pending-item", {
+        ...itemBase("pending-item", "running"),
+        type: "command_execution",
+        input: "sleep 60",
+      });
+      yield* createThread({
+        name: "watching",
+        parent: "root",
+        pullRequests: [
+          {
+            ...watchedLink,
+            watch: {
+              startedAt: DateTime.formatIso(now),
+              headSha: null,
+              failedChecks: [],
+              passed: false,
+              passedChecks: [],
+              remarksThrough: DateTime.formatIso(now),
+              remarkIds: [],
+              conflicting: false,
+              wakes: 0,
+            },
+          },
+        ],
+      });
+      yield* createRun({ name: "watching", status: "completed" });
+
+      yield* createThread({ name: "middle", parent: "root" });
+      yield* createRun({ name: "middle", status: "completed" });
+      yield* createThread({ name: "grandchild", parent: "middle" });
+      yield* createRun({ name: "grandchild", status: "completed" });
+
+      yield* createThread({ name: "other-provider-thread", parent: "root" });
+      yield* createRun({ name: "other-provider-thread", status: "completed" });
+      yield* providerThread("earlier", "other-provider-thread", true);
+      yield* providerThread("active", "other-provider-thread", false);
+      yield* createThread({ name: "unwatched", parent: "root", pullRequests: [watchedLink] });
+      yield* createRun({ name: "unwatched", status: "completed" });
+      yield* createThread({ name: "limit-blocked", parent: "root" });
+      yield* createRun({ name: "limit-blocked", status: "failed" });
+      yield* applyItem("limit-blocked", {
+        ...itemBase("limit-blocked", "failed"),
+        type: "error",
+        failure: {
+          class: "usage_limit",
+          message: "Plan limit reached.",
+          resetAt: "2099-01-01T00:00:00.000Z",
+          code: "usageLimitExceeded",
+          retryable: null,
+        },
+      });
+      yield* createRun({
+        name: "limit-blocked",
+        key: "limit-blocked:queued",
+        ordinal: 2,
+        status: "queued",
+      });
+
+      const plain = yield* store.getShellSnapshot({ location: "active" });
+      const omitted = yield* store.getShellSnapshot({
+        location: "active",
+        omitIdleSubagents: true,
+      });
+
+      assert.sameMembers(
+        omitted.threads.map((thread) => thread.id),
+        [
+          "root",
+          "fork",
+          "active",
+          "asking",
+          "queued",
+          "provider-task",
+          "pending-item",
+          "watching",
+          "middle",
+        ].map(id),
+      );
+      assert.deepEqual(omitted.threads, omitIdleSubagentShells(plain.threads));
+      const fork = omitted.threads.find((thread) => thread.id === id("fork"));
+      assert.isAbove(fork?.visibleItemCount ?? 0, fork?.itemCount ?? 0);
+      assert.equal(omitted.snapshotSequence, plain.snapshotSequence);
+
+      assert.lengthOf(plain.threads, 14);
+      assert.deepEqual(
+        yield* store.getShellSnapshot({ omitIdleSubagents: true }),
+        yield* store.getShellSnapshot(),
+      );
+      assert.deepEqual(
+        yield* store.getShellSnapshot({ location: "active", omitIdleSubagents: false }),
+        plain,
+      );
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect("the SQL shell does not decode the idle children it omits", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const sql = yield* SqlClient.SqlClient;
+    const now = yield* DateTime.now;
+    const idOf = (name: string) => ThreadId.make(`thread:omit-undecoded:${name}`);
+    const createThread = (name: string, parentName: string | null) =>
+      store.apply({
+        id: EventId.make(`event:omit-undecoded:${name}`),
+        type: "thread.created",
+        threadId: idOf(name),
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: idOf(name),
+          projectId: ProjectId.make("project:omit-undecoded"),
+          title: name,
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage:
+            parentName === null
+              ? { parentThreadId: null, relationshipToParent: null, rootThreadId: idOf(name) }
+              : {
+                  parentThreadId: idOf(parentName),
+                  relationshipToParent: "subagent",
+                  rootThreadId: idOf(parentName),
+                },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+    yield* createThread("root", null);
+    yield* createThread("idle", "root");
+    yield* sql`
+      UPDATE orchestration_v2_projection_threads
+      SET payload_json = ${JSON.stringify({
+        archivedAt: null,
+        lineage: { relationshipToParent: "subagent", parentThreadId: idOf("root") },
+      })}
+      WHERE thread_id = ${idOf("idle")}
+    `;
+
+    const omitted = yield* store.getShellSnapshot({ location: "active", omitIdleSubagents: true });
+    assert.deepEqual(
+      omitted.threads.map((thread) => thread.id),
+      [idOf("root")],
+    );
+    const failure = yield* store.getShellSnapshot({ location: "active" }).pipe(Effect.flip);
+    assert.strictEqual(failure._tag, "ProjectionStoreReadError");
   }).pipe(Effect.provide(layerTest)),
 );
 

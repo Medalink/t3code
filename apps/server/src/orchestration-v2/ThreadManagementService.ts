@@ -385,7 +385,10 @@ export interface ThreadManagementServiceShape {
   }) => Effect.Effect<OrchestrationV2ThreadShellSnapshot, Orchestrator.OrchestratorV2Error>;
   readonly listActiveSubagentThreadIds: Orchestrator.OrchestratorV2["Service"]["listActiveSubagentThreadIds"];
   readonly readShellSnapshot: (
-    options?: Pick<ShellSnapshotOptions, "location" | "subagentFamilyOf" | "worktreePath">,
+    options?: Pick<
+      ShellSnapshotOptions,
+      "location" | "subagentFamilyOf" | "worktreePath" | "omitIdleSubagents"
+    >,
   ) => Effect.Effect<
     Effect.Effect<OrchestrationV2ThreadShellSnapshot, Orchestrator.OrchestratorV2Error>,
     Orchestrator.OrchestratorV2Error

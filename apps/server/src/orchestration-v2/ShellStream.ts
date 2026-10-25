@@ -88,41 +88,22 @@ export function omitIdleSubagentShells(
 }
 
 /**
- * The active rows a shell subscriber gets, and the subagent ids whose transcript events its stream
- * drops. The ids come from every row, so an omitted child that wakes keeps that filter.
- */
-export function activeShellRowsForSubscriber(
-  threads: ReadonlyArray<OrchestrationV2ThreadShell>,
-  omitIdleSubagents: boolean,
-): {
-  readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;
-  readonly subagentThreadIds: Set<string>;
-} {
-  return {
-    threads: omitIdleSubagents ? omitIdleSubagentShells(threads) : threads,
-    subagentThreadIds: new Set(
-      threads
-        .filter((thread) => thread.lineage.relationshipToParent === "subagent")
-        .map((thread) => thread.id),
-    ),
-  };
-}
-
-/**
- * One transaction covers the reads so they agree; the threads are decoded after it commits,
- * because the server shares one SQLite connection and decoding a large shell takes longer than
- * reading it.
+ * One transaction covers the reads so they agree; the threads are decoded after it commits, because
+ * the server shares one SQLite connection and decoding a large shell takes longer than reading it.
+ * A caller that omitted rows lists every subagent id here, so omitted children keep their filter.
  */
 export const loadShellSnapshotParts = Effect.fn("ShellStream.loadShellSnapshotParts")(function* <
   E1,
   E2,
   E3,
   E4,
+  E5 = never,
 >(input: {
   readonly sql: SqlClient.SqlClient;
   readonly readThreads: Effect.Effect<Effect.Effect<OrchestrationV2ThreadShellSnapshot, E2>, E1>;
   readonly listProjects: Effect.Effect<ReadonlyArray<OrchestrationProjectShell>, E3>;
   readonly latestSequence: Effect.Effect<number, E4>;
+  readonly listSubagentThreadIds?: Effect.Effect<ReadonlyArray<string>, E5>;
 }) {
   const read = yield* input.sql
     .withTransaction(
@@ -130,13 +111,21 @@ export const loadShellSnapshotParts = Effect.fn("ShellStream.loadShellSnapshotPa
         decodeThreads: input.readThreads,
         projects: input.listProjects,
         snapshotSequence: input.latestSequence,
+        listedSubagentThreadIds: input.listSubagentThreadIds ?? Effect.succeed(undefined),
       }),
     )
     .pipe(NodeSqliteClient.readOnly);
+  const threads = yield* read.decodeThreads;
   return {
     projects: read.projects,
-    threads: yield* read.decodeThreads,
+    threads,
     snapshotSequence: read.snapshotSequence,
+    subagentThreadIds: new Set<string>(
+      read.listedSubagentThreadIds ??
+        threads.threads
+          .filter((thread) => thread.lineage.relationshipToParent === "subagent")
+          .map((thread) => thread.id),
+    ),
   };
 });
 

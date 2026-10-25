@@ -30,11 +30,7 @@ import {
 } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
-import {
-  buildActiveShellSnapshot,
-  loadShellSnapshotParts,
-  omitIdleSubagentShells,
-} from "./ShellStream.ts";
+import { buildActiveShellSnapshot, loadShellSnapshotParts } from "./ShellStream.ts";
 import { boundedSnapshotResponseFields } from "./ThreadStream.ts";
 import { projectThreadProjectionForWire } from "./WireProjection.ts";
 
@@ -83,17 +79,16 @@ export const layer = HttpApiBuilder.group(
       const base = buildActiveShellSnapshot(
         yield* loadShellSnapshotParts({
           sql,
-          readThreads: threadManagement.readShellSnapshot({ location: "active" }),
+          readThreads: threadManagement.readShellSnapshot({
+            location: "active",
+            omitIdleSubagents,
+          }),
           listProjects: projectStore.listShells(),
           latestSequence: applicationEvents.latestApplicationSequence,
         }),
       );
       const projects = yield* enrichProjectShells(base.projects);
-      return {
-        ...base,
-        threads: omitIdleSubagents ? omitIdleSubagentShells(base.threads) : base.threads,
-        projects,
-      };
+      return { ...base, projects };
     });
 
     const loadThreadSnapshot = Effect.fn("http.orchestration.loadThreadSnapshot")(function* (
