@@ -326,4 +326,14 @@ describe("reuseUnchangedThreadShells", () => {
     expect(next).toBe(incoming);
     expect(next.threads[0]?.pullRequests).toEqual([]);
   });
+
+  it("drops links an inline snapshot no longer carries", () => {
+    const { pullRequests: _links, ...withoutLinks } = linked;
+    const next = reuseUnchangedThreadShells(
+      { ...v2ShellSnapshot, threads: [linked] },
+      { ...v2ShellSnapshot, threads: [withoutLinks] },
+      { pullRequestsDeferred: false },
+    );
+    expect(next.threads[0]?.pullRequests).toBeUndefined();
+  });
 });
