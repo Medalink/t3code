@@ -174,6 +174,24 @@ it.effect("pushes a refreshed editor list that differs from the stale snapshot",
   }),
 );
 
+it.effect("keeps sending live updates after the background editor scan dies", () =>
+  Effect.gen(function* () {
+    const events = yield* withLateEditorConfig(
+      snapshotConfig({ availableEditors: ["vscode"] }),
+      Stream.make(settingsUpdated({ enableProviderUpdateChecks: false })),
+      {
+        resolveFreshAvailableEditors: () => Effect.die("scan crashed"),
+        resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+      },
+    ).pipe(Stream.runCollect);
+
+    assert.deepEqual(
+      Array.from(events, (event) => event.type),
+      ["settingsUpdated"],
+    );
+  }),
+);
+
 it.effect("resends a file manager reveal kind that missed the snapshot", () =>
   Effect.gen(function* () {
     const events = yield* withLateEditorConfig(

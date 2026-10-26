@@ -796,9 +796,14 @@ it.effect("keeps the previous editor list when the background refresh fails", ()
     assert.equal(Exit.isFailure(yield* Effect.exit(launcher.resolveFreshAvailableEditors())), true);
 
     harness.scan.crash = false;
-    harness.scan.parked = undefined;
+    harness.scan.vscodePresent = false;
+    const retry = harness.park();
     assert.deepEqual(yield* launcher.resolveAvailableEditors(), first);
-    assert.deepEqual(yield* launcher.resolveFreshAvailableEditors(), first);
+    yield* Deferred.await(retry.started);
+    assert.deepEqual(yield* launcher.resolveAvailableEditors(), first);
+
+    yield* Deferred.succeed(retry.release, undefined);
+    assert.notInclude(yield* launcher.resolveFreshAvailableEditors(), "vscode");
   }).pipe(harness.provide);
 });
 
