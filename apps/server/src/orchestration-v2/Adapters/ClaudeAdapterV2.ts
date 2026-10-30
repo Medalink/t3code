@@ -2727,6 +2727,13 @@ function providerFailureFromResult(
     return null;
   }
   const apiErrorStatus = message.api_error_status ?? null;
+  // shortcut: a CLIProxyAPI-style proxy names its cooldown end in the 429 text, since token-auth CLIs drop reset headers.
+  const proxyResetAt =
+    apiErrorStatus === 429
+      ? / are cooling down(?: via provider \S+)? until (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) \(/.exec(
+          message.result,
+        )?.[1]
+      : undefined;
   return makeProviderFailure({
     message: listedError ?? structuredError ?? failureHint ?? message.result,
     code:
@@ -2735,6 +2742,7 @@ function providerFailureFromResult(
         : `api_error_${apiErrorStatus}`,
     class: failureClass,
     retryable: apiErrorStatus === 429 || apiErrorStatus === 529 ? true : null,
+    resetAt: proxyResetAt ?? null,
   });
 }
 
